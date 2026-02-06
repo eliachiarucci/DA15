@@ -1,0 +1,5 @@
+build/
+mx.scratch
+.vscode/settings.json
+.claude/
+CLAUDE.md
