@@ -7,7 +7,7 @@ Firmware for the DA15 USB-C DAC/AMP.
 - **Single USB-C cable**: for power and 24-bit/48kHz stereo audio (USB Audio Class 1).
 
 ![DA15 Front](Hardware/Images/Front.jpg)
-![DA15 Front](Hardware/Images/PCB.jpg)
+![DA15 PCB Render](Hardware/Images/3D_Render.png)
 
 For more pictures, see [Hardware/Images](Hardware/Images/).
 
