@@ -4,7 +4,7 @@ Firmware for the DA15 USB-C DAC/AMP.
 - **MCU**: STM32F072
 - **DAC**: PCM5101A
 - **AMP**: PAM8965
-- **Single USB-C cable**: for power and 48kHz/24-bit stereo audio (USB Audio Class 1).
+- **Single USB-C cable**: for power and 24-bit/48kHz stereo audio (USB Audio Class 1).
 
 ![DA15 Front](Hardware/Images/Front.jpg)
 ![DA15 Front](Hardware/Images/PCB.jpg)
@@ -14,7 +14,7 @@ For more pictures, see [Hardware/Images](Hardware/Images/).
 
 ## Features
 
-- **USB Audio Class 1** - 48kHz/24-bit stereo, driverless
+- **USB Audio Class 1** - 24-bit/48kHz stereo, driverless
 - **2-band EQ** - bass and treble, custom Q12 fixed-point processing
 - **USB-C power detection** - adapts output level based on CC line voltage (500mA / 1.5A / 3A)
 - **OLED UI** - SH1106 128x64 display with rotary encoder navigation
