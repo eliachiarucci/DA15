@@ -52,7 +52,7 @@ void display_set_screen(screen_state_t s);
 void display_set_dirty(void);
 
 // Record user activity (resets timeout timer, wakes display if off)
-void display_mark_activity(void);
+void display_mark_activity(uint32_t now);
 
 // ---------------------------------------------------------------------------
 // Menu

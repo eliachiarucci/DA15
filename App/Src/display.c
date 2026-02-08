@@ -47,11 +47,13 @@ static uint8_t brightness_level = 1;
 // ---------------------------------------------------------------------------
 // Display timeout
 // ---------------------------------------------------------------------------
-static const uint32_t timeout_ms[] = {0, 2000, 5000, 10000};
-static const char *timeout_names[] = {"NEVER", "2s", "5s", "10s"};
+static const uint32_t timeout_ms[] = {0, 5000, 10000, 30000};
+static const char *timeout_names[] = {"NEVER", "5s", "10s", "30s"};
 static uint8_t timeout_level = 0;
 static uint32_t last_activity_tick = 0;
 static uint8_t display_is_off = 0;
+
+#define MENU_TIMEOUT_MS 60000
 
 // ---------------------------------------------------------------------------
 // Display refresh
@@ -218,11 +220,28 @@ void display_draw(uint32_t now) {
 }
 
 void display_check_timeout(uint32_t now) {
-  if (display_is_off || timeout_level == 0 || screen_state == SCREEN_IDLE)
+  if (screen_state == SCREEN_IDLE)
+    return;
+
+  // Menu: fixed 60s inactivity → back to volume
+  if (screen_state == SCREEN_MENU) {
+    if (now - last_activity_tick >= MENU_TIMEOUT_MS) {
+      menu_editing = 0;
+      screen_state = SCREEN_VOLUME;
+      last_activity_tick = now;
+      display_dirty = 1;
+    }
+    return;
+  }
+
+  // Volume: configurable timeout → idle dot
+  if (timeout_level == 0)
     return;
   if (now - last_activity_tick >= timeout_ms[timeout_level]) {
-    sh1106_display_off();
-    display_is_off = 1;
+    screen_state = SCREEN_IDLE;
+    idle_dot_pos = now & 1;
+    idle_dot_tick = now;
+    display_dirty = 1;
   }
 }
 
@@ -257,8 +276,12 @@ void display_set_screen(screen_state_t s) {
 
 void display_set_dirty(void) { display_dirty = 1; }
 
-void display_mark_activity(void) {
-  last_activity_tick = HAL_GetTick();
+void display_mark_activity(uint32_t now) {
+  last_activity_tick = now;
+  if (screen_state == SCREEN_IDLE) {
+    screen_state = SCREEN_VOLUME;
+    display_dirty = 1;
+  }
   if (display_is_off) {
     sh1106_display_on();
     display_is_off = 0;

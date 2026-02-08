@@ -33,18 +33,17 @@ static uint8_t settings_dirty = 0;
 // ---------------------------------------------------------------------------
 // USB idle detection
 // ---------------------------------------------------------------------------
-#define IDLE_ENTER_DEBOUNCE_MS 2000
+#define USB_STATE_DEBOUNCE_MS 2000
 static uint8_t usb_was_mounted = 0;
-static uint32_t usb_inactive_tick = 0;
-static uint8_t usb_inactive_pending = 0;
+static uint8_t usb_stable = 1;
+static uint32_t usb_change_tick = 0;
+static uint8_t usb_change_pending = 0;
 
 // ---------------------------------------------------------------------------
 // USB power detection
 // ---------------------------------------------------------------------------
 static uint16_t cc1_voltage = 0;
 static uint16_t cc2_voltage = 0;
-static uint16_t dn_voltage = 0;
-static uint16_t dp_voltage = 0;
 static uint8_t max_power_available = 0; // 0=500mA, 1=1500mA, 2=3000mA
 
 // CC voltage thresholds for USB-C power detection (mV)
@@ -75,8 +74,6 @@ static void read_usb_detection_voltages(void) {
 
   cc1_voltage = adc_read_next_mv();
   cc2_voltage = adc_read_next_mv();
-  dn_voltage = adc_read_next_mv();
-  dp_voltage = adc_read_next_mv();
 
   SEGGER_RTT_printf(0, "CC1 Voltage : %dmV\n", cc1_voltage);
   SEGGER_RTT_printf(0, "CC2 Voltage: %dmV\n", cc2_voltage);
@@ -132,7 +129,7 @@ static void mark_settings_dirty(uint32_t now) {
 // Input handling
 // ---------------------------------------------------------------------------
 static void handle_short_press(uint32_t now) {
-  display_mark_activity();
+  display_mark_activity(now);
   screen_state_t s = display_get_screen();
 
   if (s == SCREEN_VOLUME) {
@@ -153,7 +150,7 @@ static void handle_short_press(uint32_t now) {
 }
 
 static void handle_long_press(uint32_t now) {
-  display_mark_activity();
+  display_mark_activity(now);
   screen_state_t s = display_get_screen();
 
   if (s == SCREEN_VOLUME) {
@@ -172,7 +169,7 @@ static int16_t clamp_i16(int16_t val, int16_t lo, int16_t hi) {
 }
 
 static void handle_encoder_rotate(int8_t delta, uint32_t now) {
-  display_mark_activity();
+  display_mark_activity(now);
   screen_state_t s = display_get_screen();
 
   if (s == SCREEN_VOLUME) {
@@ -275,44 +272,48 @@ void app_loop(void) {
   tud_task();
   audio_output_task();
 
-  // --- USB connection monitoring (idle screen for OLED protection) ---
-  {
-    uint8_t usb_active = tud_mounted() && !tud_suspended();
-    if (usb_active)
-      usb_was_mounted = 1;
+  // --- USB connection monitoring (idle screen for OLED burn-in protection) ---
+  // Any USB state change must hold stable for 3s before taking effect.
+  uint8_t usb_active = tud_mounted() && !tud_suspended();
+  if (usb_active)
+    usb_was_mounted = 1;
 
-    if (!usb_active && usb_was_mounted &&
-        display_get_screen() != SCREEN_IDLE) {
-      if (!usb_inactive_pending) {
-        usb_inactive_pending = 1;
-        usb_inactive_tick = now;
-      } else if (now - usb_inactive_tick >= IDLE_ENTER_DEBOUNCE_MS) {
-        usb_inactive_pending = 0;
-        display_enter_idle(now);
+  if (usb_was_mounted) {
+    if (usb_active != usb_stable) {
+      if (!usb_change_pending) {
+        usb_change_pending = 1;
+        usb_change_tick = now;
+      } else if (now - usb_change_tick >= USB_STATE_DEBOUNCE_MS) {
+        usb_change_pending = 0;
+        usb_stable = usb_active;
+        if (!usb_stable) {
+          if (display_get_screen() != SCREEN_IDLE)
+            display_enter_idle(now);
+        } else {
+          if (display_get_screen() == SCREEN_IDLE)
+            display_mark_activity(now);
+        }
       }
     } else {
-      usb_inactive_pending = 0;
-      if (usb_active && display_get_screen() == SCREEN_IDLE) {
-        display_set_screen(SCREEN_VOLUME);
-      }
+      usb_change_pending = 0;
     }
   }
 
   // --- Idle dot position switch ---
   display_idle_tick(now);
 
-  // --- Encoder input ---
+  // --- Encoder input (drain events always, act only when USB active) ---
   encoder_poll(now);
 
-  if (encoder_has_short_press()) {
+  if (encoder_has_short_press() && usb_active) {
     handle_short_press(now);
   }
-  if (encoder_has_long_press()) {
+  if (encoder_has_long_press() && usb_active) {
     handle_long_press(now);
   }
 
   int8_t delta = encoder_get_delta();
-  if (delta != 0) {
+  if (delta != 0 && usb_active) {
     handle_encoder_rotate(delta, now);
   }
 
