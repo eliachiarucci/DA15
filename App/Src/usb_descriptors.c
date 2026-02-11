@@ -22,8 +22,8 @@ static tusb_desc_device_t const desc_device = {
     .bDeviceProtocol    = MISC_PROTOCOL_IAD,
     .bMaxPacketSize0    = CFG_TUD_ENDPOINT0_SIZE,
 
-    .idVendor           = 0x1209,  // pid.codes VID for open source hardware
-    .idProduct          = 0x0001,  // Temporary PID - get a proper one from pid.codes
+    .idVendor           = 0x1209,  // pid.codes VID
+    .idProduct          = 0xDA15,  // pid.codes PID
     .bcdDevice          = 0x0100,
 
     .iManufacturer      = 0x01,
