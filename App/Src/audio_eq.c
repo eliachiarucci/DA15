@@ -137,6 +137,17 @@ int8_t audio_eq_get_band(uint8_t band) {
     return 0;
 }
 
+void audio_eq_reset_state(void) {
+    bass_hp_lp_left = 0;
+    bass_hp_lp_right = 0;
+    lp1_left = 0;
+    lp1_right = 0;
+    lp2_left = 0;
+    lp2_right = 0;
+    treble_lp_left = 0;
+    treble_lp_right = 0;
+}
+
 void audio_eq_enable(bool enable) {
     eq_enabled = enable;
     if (!enable) {

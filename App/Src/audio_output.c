@@ -280,6 +280,9 @@ void audio_output_start_streaming(void) {
   streaming = 1;
   prebuffering = 1; // Start in prebuffering mode
 
+  // Reset EQ filter state to avoid transient spikes from stale filter memory
+  audio_eq_reset_state();
+
   // Clear buffer with silence
   memset(i2s_buffer, 0, sizeof(i2s_buffer));
 
@@ -296,9 +299,6 @@ void audio_output_stop_streaming(void) {
   streaming = 0;
   prebuffering = 0;
 
-  // Mute DAC (keep amp enabled to avoid pop on re-enable)
-  mute_dac();
-
   // Stop DMA, clear buffer, restart with silence to keep DAC output clean
   if (dma_running) {
     HAL_I2S_DMAStop(&hi2s1);
@@ -309,9 +309,6 @@ void audio_output_stop_streaming(void) {
 
   HAL_I2S_Transmit_DMA(&hi2s1, i2s_buffer, I2S_DMA_SIZE);
   dma_running = 1;
-
-  // Unmute — DAC now outputs clean silence
-  unmute_dac();
 }
 
 void audio_output_task(void) {

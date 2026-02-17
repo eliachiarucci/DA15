@@ -32,6 +32,9 @@ void audio_eq_set_band(uint8_t band, int8_t value);
 // Get EQ band value
 int8_t audio_eq_get_band(uint8_t band);
 
+// Reset filter state (call on stream start to avoid transient spikes)
+void audio_eq_reset_state(void);
+
 // Enable/disable EQ processing
 void audio_eq_enable(bool enable);
 bool audio_eq_is_enabled(void);
