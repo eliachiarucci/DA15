@@ -15,12 +15,12 @@
 #include "main.h"
 #include "settings.h"
 #include "sh1106.h"
-#include "stm32f0xx_hal.h"
+#include "stm32h5xx_hal.h"
 #include "tusb.h"
 #include <stdint.h>
 
 // External handles from main.c
-extern ADC_HandleTypeDef hadc;
+extern ADC_HandleTypeDef hadc1;
 extern I2C_HandleTypeDef hi2c2;
 
 // ---------------------------------------------------------------------------
@@ -53,21 +53,21 @@ static uint8_t max_power_available = 0; // 0=500mA, 1=1500mA, 2=3000mA
 
 static uint16_t adc_read_next_mv(void) {
   uint16_t mv = 0;
-  if (HAL_ADC_PollForConversion(&hadc, 10) == HAL_OK) {
-    mv = (HAL_ADC_GetValue(&hadc) * 3300U) / 4095U;
+  if (HAL_ADC_PollForConversion(&hadc1, 10) == HAL_OK) {
+    mv = (HAL_ADC_GetValue(&hadc1) * 3300U) / 4095U;
   }
   HAL_Delay(50);
   return mv;
 }
 
 static void read_usb_detection_voltages(void) {
-  if (HAL_ADCEx_Calibration_Start(&hadc) != HAL_OK) {
+  if (HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED) != HAL_OK) {
     SEGGER_RTT_printf(0, "ADC calibration failed\n");
     return;
   }
   HAL_Delay(50);
 
-  if (HAL_ADC_Start(&hadc) != HAL_OK) {
+  if (HAL_ADC_Start(&hadc1) != HAL_OK) {
     SEGGER_RTT_printf(0, "ADC start failed\n");
     return;
   }
@@ -78,7 +78,7 @@ static void read_usb_detection_voltages(void) {
   SEGGER_RTT_printf(0, "CC1 Voltage : %dmV\n", cc1_voltage);
   SEGGER_RTT_printf(0, "CC2 Voltage: %dmV\n", cc2_voltage);
 
-  HAL_ADC_Stop(&hadc);
+  HAL_ADC_Stop(&hadc1);
 
   uint16_t highest_CC_voltage = cc1_voltage;
   if (cc2_voltage > highest_CC_voltage) {
@@ -99,7 +99,7 @@ uint8_t app_get_power_level(void) { return max_power_available; }
 // ---------------------------------------------------------------------------
 // DFU bootloader reboot
 // ---------------------------------------------------------------------------
-#define DFU_MAGIC_ADDR  ((volatile uint32_t *)0x20003FF0)
+#define DFU_MAGIC_ADDR  ((volatile uint32_t *)0x20007FF0)  // end of 32KB RAM
 #define DFU_MAGIC_VALUE 0xDEADBEEFUL
 
 void app_reboot_to_dfu(void) {
@@ -219,21 +219,26 @@ static void handle_encoder_rotate(int8_t delta, uint32_t now) {
 // Initialization
 // ---------------------------------------------------------------------------
 void app_init(void) {
+  SEGGER_RTT_printf(0, "\n=== DA15 boot ===\n");
 
   // Read USB detection voltages (CC1, CC2, DN, DP)
   read_usb_detection_voltages();
 
   // Initialize OLED display
+  SEGGER_RTT_printf(0, "[init] OLED init...\n");
   sh1106_init(&hi2c2);
   HAL_Delay(1000);
 
   // Initialize audio output hardware
+  SEGGER_RTT_printf(0, "[init] audio output init...\n");
   audio_output_init();
 
   // Initialize TinyUSB device stack
+  SEGGER_RTT_printf(0, "[init] TinyUSB init...\n");
   tusb_rhport_init_t dev_init = {.role = TUSB_ROLE_DEVICE,
                                  .speed = TUSB_SPEED_AUTO};
   tusb_init(BOARD_TUD_RHPORT, &dev_init);
+  SEGGER_RTT_printf(0, "[init] TinyUSB init done\n");
 
   // Default EQ (flat)
   audio_eq_set_band(EQ_BAND_BASS, 0);
@@ -241,13 +246,16 @@ void app_init(void) {
 
   // Initialize encoder
   encoder_init();
+  SEGGER_RTT_printf(0, "[init] encoder done\n");
 
   // Load persistent settings
   uint8_t brightness = 1;
   uint8_t timeout = 0;
 
+  SEGGER_RTT_printf(0, "[init] loading settings...\n");
   settings_t saved;
   if (settings_load(&saved)) {
+    SEGGER_RTT_printf(0, "[init] settings loaded OK\n");
     audio_output_set_local_volume(saved.local_volume);
     if (saved.local_muted) {
       audio_output_toggle_local_mute();
@@ -256,10 +264,15 @@ void app_init(void) {
     audio_eq_set_band(EQ_BAND_TREBLE, saved.treble);
     brightness = saved.brightness;
     timeout = saved.display_timeout;
+  } else {
+    SEGGER_RTT_printf(0, "[init] no valid settings, using defaults\n");
   }
 
   // Initialize display module (applies brightness, starts activity timer)
+  SEGGER_RTT_printf(0, "[init] display init...\n");
   display_init(brightness, timeout);
+
+  SEGGER_RTT_printf(0, "[init] complete, entering main loop\n");
 }
 
 // ---------------------------------------------------------------------------

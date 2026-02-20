@@ -72,6 +72,28 @@ Drivers/       STM32F0xx HAL library
 Lib/           TinyUSB (USB stack), SEGGER RTT (debug)
 ```
 
+## Installing ST OpenOCD for STM32H5 support (macOS)
+
+```bash
+# Install dependencies (if not already installed)
+brew install automake autoconf libtool pkg-config libusb texinfo
+
+# Unlink upstream OpenOCD if installed
+brew unlink open-ocd 2>/dev/null
+
+# Clone and build
+git clone https://github.com/STMicroelectronics/OpenOCD.git
+cd /tmp/st-openocd
+./bootstrap
+./configure --enable-stlink CFLAGS="-Wno-gnu-folding-constant"
+make -j$(sysctl -n hw.ncpu)
+
+# Install
+sudo mkdir -p /opt/homebrew/bin /opt/homebrew/share/openocd/scripts
+sudo cp src/openocd /opt/homebrew/bin/openocd
+sudo cp -r tcl/* /opt/homebrew/share/openocd/scripts/
+
+
 ## Dependencies
 
 | Library | License | Purpose |

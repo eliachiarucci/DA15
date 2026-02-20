@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Elia Chiarucci
 
 /*
- * TinyUSB Configuration for STM32F072 USB Audio (UAC1)
+ * TinyUSB Configuration for STM32H503 USB Audio (UAC1)
  */
 
 #ifndef _TUSB_CONFIG_H_
@@ -26,7 +26,7 @@ extern "C" {
 // Common Configuration
 //--------------------------------------------------------------------+
 
-#define CFG_TUSB_MCU          OPT_MCU_STM32F0
+#define CFG_TUSB_MCU          OPT_MCU_STM32H5
 #define CFG_TUSB_OS           OPT_OS_NONE
 
 // CFG_TUSB_DEBUG is defined by compiler in DEBUG build

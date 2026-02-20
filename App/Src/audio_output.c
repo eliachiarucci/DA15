@@ -13,14 +13,14 @@
 #include "audio_eq.h"
 #include "main.h"
 #include "sh1106.h"
-#include "stm32f0xx_hal.h"
+#include "stm32h5xx_hal.h"
 #include "tusb.h"
 #include "usb_audio.h"
 #include <string.h>
 
 
 // Debug: set to 1 to enable RTT logging
-#define AUDIO_DEBUG 0
+#define AUDIO_DEBUG 1
 
 // Swap L/R channels: set to 1 to swap stereo channels
 #define SWAP_CHANNELS 1
@@ -93,6 +93,26 @@ static volatile uint32_t underrun_count = 0;
 static volatile uint32_t partial_fill_count = 0;
 static volatile uint32_t full_fill_count = 0;
 static volatile uint32_t last_report_tick = 0;
+
+// FIFO level tracking (sampled at each DMA half-complete)
+static volatile int16_t fifo_min_delta = 0;   // min deviation from midpoint
+static volatile int16_t fifo_max_delta = 0;   // max deviation from midpoint
+static volatile int32_t fifo_sum_delta = 0;    // sum for averaging
+static volatile uint16_t fifo_sample_count = 0; // number of samples
+#define FIFO_MIDPOINT (PREBUFFER_THRESHOLD / 2)
+
+static void fifo_track_level(void) {
+  int16_t delta = (int16_t)usb_audio_available() - FIFO_MIDPOINT;
+  if (fifo_sample_count == 0) {
+    fifo_min_delta = delta;
+    fifo_max_delta = delta;
+  } else {
+    if (delta < fifo_min_delta) fifo_min_delta = delta;
+    if (delta > fifo_max_delta) fifo_max_delta = delta;
+  }
+  fifo_sum_delta += delta;
+  fifo_sample_count++;
+}
 #endif
 
 //--------------------------------------------------------------------+
@@ -137,17 +157,13 @@ static const uint16_t volume_table[91] = {
 
 // Fill I2S buffer with held last sample (less audible than silence on underrun)
 static void fill_with_hold(uint16_t *buffer, uint16_t frame_count) {
-  uint16_t l_hi, l_lo, r_hi, r_lo;
-  l_hi = (uint16_t)((last_sample_left >> 8) & 0xFFFF);
-  l_lo = (uint16_t)((last_sample_left & 0xFF) << 8);
-  r_hi = (uint16_t)((last_sample_right >> 8) & 0xFFFF);
-  r_lo = (uint16_t)((last_sample_right & 0xFF) << 8);
+  uint32_t *buf32 = (uint32_t *)buffer;
+  uint32_t l_val = (uint32_t)last_sample_left << 8;
+  uint32_t r_val = (uint32_t)last_sample_right << 8;
 
   for (uint16_t i = 0; i < frame_count; i++) {
-    buffer[i * 4] = l_hi;
-    buffer[i * 4 + 1] = l_lo;
-    buffer[i * 4 + 2] = r_hi;
-    buffer[i * 4 + 3] = r_lo;
+    buf32[i * 2] = l_val;
+    buf32[i * 2 + 1] = r_val;
   }
 }
 
@@ -228,13 +244,11 @@ static uint16_t read_audio_data(uint16_t *i2s_dest,
     last_sample_right = proc[sample_count - 1];
   }
 
-  // Convert int32_t (24-bit) to I2S 32-bit frame format (in-place,
-  // forward-safe) proc[i] at offset i*4 bytes, writing to i2s_dest[i*2] at
-  // offset i*4 bytes = same location
+  // Pack int32_t (24-bit) to uint32_t for word-mode DMA (in-place,
+  // forward-safe: proc[i] and out32[i] share the same address at offset i*4)
+  uint32_t *out32 = (uint32_t *)i2s_dest;
   for (uint16_t i = 0; i < sample_count; i++) {
-    int32_t s = proc[i];
-    i2s_dest[i * 2] = (uint16_t)((s >> 8) & 0xFFFF);
-    i2s_dest[i * 2 + 1] = (uint16_t)((s & 0xFF) << 8);
+    out32[i] = (uint32_t)proc[i] << 8;
   }
 
   return stereo_frames;
@@ -245,6 +259,8 @@ static uint16_t read_audio_data(uint16_t *i2s_dest,
 //--------------------------------------------------------------------+
 
 void audio_output_init(void) {
+  SEGGER_RTT_printf(0, "[audio] init start\n");
+
   // Initialize EQ
   audio_eq_init();
 
@@ -261,15 +277,20 @@ void audio_output_init(void) {
   disable_amplifier();
 
   // Start I2S DMA with silence so DAC has a defined zero output
-  HAL_I2S_Transmit_DMA(&hi2s1, i2s_buffer, I2S_DMA_SIZE);
+  SEGGER_RTT_printf(0, "[audio] I2S DMA start (buf=%p, size=%d)...\n",
+                    i2s_buffer, I2S_DMA_SIZE);
+  HAL_StatusTypeDef rc = HAL_I2S_Transmit_DMA(&hi2s1, i2s_buffer, I2S_DMA_SIZE);
+  SEGGER_RTT_printf(0, "[audio] I2S DMA result: %d\n", rc);
   dma_running = 1;
 
   // Unmute DAC — now outputting clean silence via I2S
   unmute_dac();
+  SEGGER_RTT_printf(0, "[audio] DAC unmuted, waiting 500ms...\n");
 
   // Let DAC output settle, then enable amplifier into a stable signal
   HAL_Delay(500);
   enable_amplifier();
+  SEGGER_RTT_printf(0, "[audio] amp enabled, init done\n");
 }
 
 void audio_output_start_streaming(void) {
@@ -417,12 +438,26 @@ void audio_output_task(void) {
   // Periodic status report every 2 seconds
   uint32_t now = HAL_GetTick();
   if (now - last_report_tick >= 2000) {
-    uint16_t fifo_level = usb_audio_available();
-    (void)fifo_level;
-    // Reset counters for next period
+    uint16_t fifo_now = usb_audio_available();
+    int16_t avg_delta = 0;
+    if (fifo_sample_count > 0)
+      avg_delta = (int16_t)(fifo_sum_delta / fifo_sample_count);
+
+    SEGGER_RTT_printf(0,
+        "FIFO: now=%d mid=%d | delta min=%d avg=%d max=%d | "
+        "fills=%lu partial=%lu under=%lu\n",
+        fifo_now, FIFO_MIDPOINT,
+        fifo_min_delta, avg_delta, fifo_max_delta,
+        full_fill_count, partial_fill_count, underrun_count);
+
+    // Reset counters
     full_fill_count = 0;
     partial_fill_count = 0;
     underrun_count = 0;
+    fifo_min_delta = 0;
+    fifo_max_delta = 0;
+    fifo_sum_delta = 0;
+    fifo_sample_count = 0;
     last_report_tick = now;
   }
 #endif
@@ -463,15 +498,19 @@ uint8_t audio_output_is_local_muted(void) { return local_muted; }
 // Called when first half of buffer has been sent
 void HAL_I2S_TxHalfCpltCallback(I2S_HandleTypeDef *hi2s) {
   if (hi2s->Instance == SPI1) {
-    // First half has been transmitted, mark it for refill
     first_half_needs_fill = 1;
+#if AUDIO_DEBUG
+    fifo_track_level();
+#endif
   }
 }
 
 // Called when second half of buffer has been sent (full transfer complete)
 void HAL_I2S_TxCpltCallback(I2S_HandleTypeDef *hi2s) {
   if (hi2s->Instance == SPI1) {
-    // Second half has been transmitted, mark it for refill
     second_half_needs_fill = 1;
+#if AUDIO_DEBUG
+    fifo_track_level();
+#endif
   }
 }

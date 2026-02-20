@@ -23,7 +23,7 @@
 
 #include "encoder.h"
 #include "main.h"
-#include "stm32f0xx_hal.h"
+#include "stm32h5xx_hal.h"
 
 // Most encoders with detents: 1 detent = 1 full quadrature cycle = 4 edges
 // Change to 2 if your encoder detents at half-cycles

@@ -4,7 +4,7 @@
 #ifndef SH1106_H
 #define SH1106_H
 
-#include "stm32f0xx_hal.h"
+#include "stm32h5xx_hal.h"
 #include <stdint.h>
 
 // Display dimensions (128x64)

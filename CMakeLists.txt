@@ -74,7 +74,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # TinyUSB DFU Runtime class driver
     "${TINYUSB_PATH}/src/class/dfu/dfu_rt_device.c"
 
-    # TinyUSB STM32 FSDEV portable driver (for STM32F0)
+    # TinyUSB STM32 FSDEV portable driver (for STM32H5)
     "${TINYUSB_PATH}/src/portable/st/stm32_fsdev/dcd_stm32_fsdev.c"
     "${TINYUSB_PATH}/src/portable/st/stm32_fsdev/fsdev_common.c"
 )
@@ -94,7 +94,7 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
 # Add project symbols (macros)
 target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
     # TinyUSB config location
-    CFG_TUSB_MCU=OPT_MCU_STM32F0
+    CFG_TUSB_MCU=OPT_MCU_STM32H5
 )
 
 # Remove wrong libob.a library dependency when using cpp files

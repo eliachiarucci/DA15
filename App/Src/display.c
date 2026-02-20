@@ -11,7 +11,7 @@
 #include "audio_eq.h"
 #include "audio_output.h"
 #include "sh1106.h"
-#include "stm32f0xx_hal.h"
+#include "stm32h5xx_hal.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -60,7 +60,7 @@ static uint8_t display_is_off = 0;
 // ---------------------------------------------------------------------------
 static uint8_t display_dirty = 1;
 static uint32_t display_last_tick = 0;
-#define DISPLAY_MIN_INTERVAL_MS 67
+#define DISPLAY_MIN_INTERVAL_MS 33
 
 // ---------------------------------------------------------------------------
 // Idle dot (OLED burn-in protection)

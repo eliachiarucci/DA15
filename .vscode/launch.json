@@ -26,10 +26,10 @@
             "cwd": "${workspaceFolder}",
             "preLaunchTask": "Build",
             "executable": "${workspaceFolder}/build/Release/DA15.elf",
-            "device": "STM32F072CB",
+            "device": "STM32H503CB",
             "configFiles": [
-                "interface/stlink-v2-1.cfg",
-                "target/stm32f0x.cfg"
+                "interface/stlink-dap.cfg",
+                "target/stm32h5x.cfg"
             ],
             "rttConfig": {
                 "enabled": true,
@@ -43,7 +43,7 @@
                 ]
             },
             "runToEntryPoint": "",
-            "svdFile": "${workspaceFolder}/STM32F072.svd"
+            "svdFile": "${workspaceFolder}/STM32H503.svd"
         }
     ]
 }
