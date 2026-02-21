@@ -344,9 +344,10 @@ void app_init(void) {
 void app_loop(void) {
   uint32_t now = HAL_GetTick();
 
-  // --- High priority: USB + audio ---
+  // --- High priority: USB + audio + flash ---
   tud_task();
   audio_output_task();
+  eq_profile_flash_task();
   usb_comm_task();
 
   // --- USB connection monitoring (idle screen for OLED burn-in protection) ---

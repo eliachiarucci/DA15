@@ -61,6 +61,16 @@ typedef struct {
 } eq_profile_t;
 
 // ---------------------------------------------------------------------------
+// Flash operation status
+// ---------------------------------------------------------------------------
+typedef enum {
+    EQ_FLASH_IDLE,
+    EQ_FLASH_BUSY,
+    EQ_FLASH_DONE_OK,
+    EQ_FLASH_DONE_ERR,
+} eq_flash_status_t;
+
+// ---------------------------------------------------------------------------
 // Profile management
 // ---------------------------------------------------------------------------
 
@@ -79,15 +89,25 @@ bool eq_profile_delete(uint8_t id);
 // Number of non-empty profile slots.
 uint8_t eq_profile_count(void);
 
-// Persist all profiles from RAM to flash (erases sector, writes all).
-bool eq_profile_save_to_flash(void);
+// ---------------------------------------------------------------------------
+// Non-blocking flash save
+// ---------------------------------------------------------------------------
+
+// Start async flash save. Returns false if already busy.
+// Erases sector (blocking ~1-2ms), then writes in chunks via flash_task.
+bool eq_profile_start_flash_save(void);
+
+// Process flash write state machine. Call from main loop.
+void eq_profile_flash_task(void);
+
+// Get flash operation status. DONE states reset to IDLE after reading.
+eq_flash_status_t eq_profile_flash_status(void);
 
 // ---------------------------------------------------------------------------
 // Active profile
 // ---------------------------------------------------------------------------
 
 // Set the active profile. EQ_PROFILE_OFF = use legacy bass/treble.
-// Takes effect immediately (resets biquad state).
 void eq_profile_set_active(uint8_t id);
 
 // Get the active profile ID (EQ_PROFILE_OFF if none).

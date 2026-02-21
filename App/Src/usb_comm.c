@@ -60,6 +60,9 @@ static uint8_t rx_buf[MAX_PAYLOAD_SIZE];
 // TX buffer (reuse for responses)
 static uint8_t tx_buf[FRAME_HEADER_SIZE + 1 + MAX_PAYLOAD_SIZE + FRAME_CRC_SIZE];
 
+// Deferred response for async operations (e.g. SAVE_TO_FLASH)
+static uint8_t deferred_cmd = 0;
+
 // ---------------------------------------------------------------------------
 // Response helpers
 // ---------------------------------------------------------------------------
@@ -183,12 +186,13 @@ static void handle_set_active(void) {
 }
 
 static void handle_save_to_flash(void) {
-    if (!eq_profile_save_to_flash()) {
+    if (!eq_profile_start_flash_save()) {
         send_error(CMD_SAVE_TO_FLASH, STATUS_ERR_FLASH);
         return;
     }
 
-    send_ok(CMD_SAVE_TO_FLASH, NULL, 0);
+    // Response deferred — sent from usb_comm_task when flash completes
+    deferred_cmd = CMD_SAVE_TO_FLASH;
 }
 
 // ---------------------------------------------------------------------------
@@ -218,6 +222,18 @@ void usb_comm_init(void) {
 }
 
 void usb_comm_task(void) {
+    // Check for deferred flash save response
+    if (deferred_cmd == CMD_SAVE_TO_FLASH) {
+        eq_flash_status_t s = eq_profile_flash_status();
+        if (s == EQ_FLASH_DONE_OK) {
+            send_ok(CMD_SAVE_TO_FLASH, NULL, 0);
+            deferred_cmd = 0;
+        } else if (s == EQ_FLASH_DONE_ERR) {
+            send_error(CMD_SAVE_TO_FLASH, STATUS_ERR_FLASH);
+            deferred_cmd = 0;
+        }
+    }
+
     if (!tud_cdc_available())
         return;
 

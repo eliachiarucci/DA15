@@ -6,7 +6,8 @@
  *
  * Flash storage: 8KB sector at 0x0801C000 (Bank 2, Sector 6).
  * On init, the entire store is loaded into RAM. Modifications happen
- * in RAM; SAVE_TO_FLASH erases the sector and writes everything back.
+ * in RAM; flash save erases the sector and writes back in non-blocking
+ * chunks via eq_profile_flash_task() to avoid stalling audio DMA.
  *
  * Audio processing: Direct Form II Transposed biquad cascade using
  * the Cortex-M33 single-precision FPU.
@@ -58,6 +59,17 @@ typedef struct {
 static biquad_state_t filter_state[EQ_MAX_FILTERS][2]; // [filter][channel]
 
 // ---------------------------------------------------------------------------
+// Non-blocking flash write state machine
+// ---------------------------------------------------------------------------
+// Quad-words to write per main loop tick (~1ms at 30us/write)
+#define FLASH_WRITES_PER_TICK 32
+
+static eq_flash_status_t flash_op = EQ_FLASH_IDLE;
+static uint32_t flash_write_offset;
+static uint32_t flash_write_total;
+static uint8_t  flash_pad_buf[16]; // For partial last quad-word
+
+// ---------------------------------------------------------------------------
 // CRC32 (same polynomial as zlib, computed in software)
 // ---------------------------------------------------------------------------
 static uint32_t crc32_update(uint32_t crc, const uint8_t *data, uint32_t len) {
@@ -75,7 +87,7 @@ static uint32_t crc32_update(uint32_t crc, const uint8_t *data, uint32_t len) {
 }
 
 // ---------------------------------------------------------------------------
-// Flash helpers (same patterns as settings.c)
+// Flash helpers
 // ---------------------------------------------------------------------------
 static bool erase_profiles_sector(void) {
     HAL_FLASH_Unlock();
@@ -90,50 +102,8 @@ static bool erase_profiles_sector(void) {
     HAL_StatusTypeDef status = HAL_FLASHEx_Erase(&erase, &sector_error);
 
     HAL_FLASH_Lock();
-    HAL_ICACHE_Invalidate();
 
     return status == HAL_OK;
-}
-
-static bool write_profiles_to_flash(void) {
-    const uint8_t *src = (const uint8_t *)&store;
-    uint32_t addr = PROFILES_ADDR;
-    uint32_t total = sizeof(eq_profile_store_t);
-
-    // Round up to quad-word boundary (16 bytes)
-    uint32_t padded = (total + 15U) & ~15U;
-
-    // Prepare a 16-byte aligned buffer for the last chunk
-    uint8_t quad[16];
-
-    HAL_FLASH_Unlock();
-
-    for (uint32_t offset = 0; offset < padded; offset += 16) {
-        if (offset + 16 <= total) {
-            // Full quad-word from source
-            HAL_StatusTypeDef status = HAL_FLASH_Program(
-                FLASH_TYPEPROGRAM_QUADWORD, addr + offset,
-                (uint32_t)(src + offset));
-            if (status != HAL_OK) {
-                HAL_FLASH_Lock();
-                return false;
-            }
-        } else {
-            // Partial last quad-word: pad with 0xFF
-            memset(quad, 0xFF, 16);
-            uint32_t remaining = total - offset;
-            memcpy(quad, src + offset, remaining);
-            HAL_StatusTypeDef status = HAL_FLASH_Program(
-                FLASH_TYPEPROGRAM_QUADWORD, addr + offset, (uint32_t)quad);
-            if (status != HAL_OK) {
-                HAL_FLASH_Lock();
-                return false;
-            }
-        }
-    }
-
-    HAL_FLASH_Lock();
-    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -226,23 +196,85 @@ uint8_t eq_profile_count(void) {
     return store.profile_count;
 }
 
-bool eq_profile_save_to_flash(void) {
+// ---------------------------------------------------------------------------
+// Non-blocking flash save
+// ---------------------------------------------------------------------------
+bool eq_profile_start_flash_save(void) {
+    if (flash_op == EQ_FLASH_BUSY)
+        return false;
+
     // Update checksum
     store.checksum = crc32_update(
         0, (const uint8_t *)store.profiles, sizeof(store.profiles));
 
+    // Erase sector (blocking ~1-2ms, fits within one 5ms DMA half-buffer)
     if (!erase_profiles_sector()) {
         SEGGER_RTT_printf(0, "[eq] flash erase failed\n");
-        return false;
-    }
-    if (!write_profiles_to_flash()) {
-        SEGGER_RTT_printf(0, "[eq] flash write failed\n");
-        return false;
+        flash_op = EQ_FLASH_DONE_ERR;
+        return true; // Operation started, will report error via status
     }
 
-    SEGGER_RTT_printf(0, "[eq] saved %d profiles to flash\n",
-                      store.profile_count);
+    // Prepare for incremental writes
+    flash_write_total = (sizeof(eq_profile_store_t) + 15U) & ~15U;
+    flash_write_offset = 0;
+    flash_op = EQ_FLASH_BUSY;
+
+    HAL_FLASH_Unlock();
     return true;
+}
+
+void eq_profile_flash_task(void) {
+    if (flash_op != EQ_FLASH_BUSY)
+        return;
+
+    const uint8_t *src = (const uint8_t *)&store;
+    uint32_t total = sizeof(eq_profile_store_t);
+
+    // Write up to FLASH_WRITES_PER_TICK quad-words per call
+    for (uint8_t n = 0; n < FLASH_WRITES_PER_TICK && flash_write_offset < flash_write_total; n++) {
+        uint32_t addr = PROFILES_ADDR + flash_write_offset;
+
+        if (flash_write_offset + 16 <= total) {
+            // Full quad-word from source
+            if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_QUADWORD, addr,
+                                  (uint32_t)(src + flash_write_offset)) != HAL_OK) {
+                HAL_FLASH_Lock();
+                SEGGER_RTT_printf(0, "[eq] flash write failed at offset %lu\n",
+                                  flash_write_offset);
+                flash_op = EQ_FLASH_DONE_ERR;
+                return;
+            }
+        } else {
+            // Partial last quad-word: pad with 0xFF
+            memset(flash_pad_buf, 0xFF, 16);
+            uint32_t remaining = total - flash_write_offset;
+            memcpy(flash_pad_buf, src + flash_write_offset, remaining);
+            if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_QUADWORD, addr,
+                                  (uint32_t)flash_pad_buf) != HAL_OK) {
+                HAL_FLASH_Lock();
+                SEGGER_RTT_printf(0, "[eq] flash write failed at offset %lu\n",
+                                  flash_write_offset);
+                flash_op = EQ_FLASH_DONE_ERR;
+                return;
+            }
+        }
+        flash_write_offset += 16;
+    }
+
+    if (flash_write_offset >= flash_write_total) {
+        HAL_FLASH_Lock();
+        SEGGER_RTT_printf(0, "[eq] saved %d profiles to flash\n",
+                          store.profile_count);
+        flash_op = EQ_FLASH_DONE_OK;
+    }
+}
+
+eq_flash_status_t eq_profile_flash_status(void) {
+    eq_flash_status_t s = flash_op;
+    // Auto-reset terminal states so caller doesn't need to ack
+    if (s == EQ_FLASH_DONE_OK || s == EQ_FLASH_DONE_ERR)
+        flash_op = EQ_FLASH_IDLE;
+    return s;
 }
 
 // ---------------------------------------------------------------------------
