@@ -20,6 +20,7 @@ typedef struct {
     int8_t  treble;          // -6 to +6
     uint8_t brightness;      // 0=LOW, 1=MID, 2=HIGH
     uint8_t display_timeout; // 0=Never, 1=2s, 2=5s, 3=10s
+    uint8_t active_profile;  // 0-9=profile, 0xFF=OFF (legacy bass/treble)
 } settings_t;
 
 // Load settings from flash. Returns false if no valid settings found.

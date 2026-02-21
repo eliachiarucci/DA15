@@ -112,23 +112,10 @@ void audio_eq_set_band(uint8_t band, int8_t value) {
     if (value < -6) value = -6;
     else if (value > 6) value = 6;
 
-    if (band == EQ_BAND_BASS) {
-        if (bass_level != value) {
-            bass_hp_lp_left = 0;
-            bass_hp_lp_right = 0;
-            lp1_left = 0;
-            lp1_right = 0;
-            lp2_left = 0;
-            lp2_right = 0;
-            bass_level = value;
-        }
-    } else if (band == EQ_BAND_TREBLE) {
-        if (treble_level != value) {
-            treble_lp_left = 0;
-            treble_lp_right = 0;
-            treble_level = value;
-        }
-    }
+    if (band == EQ_BAND_BASS)
+        bass_level = value;
+    else if (band == EQ_BAND_TREBLE)
+        treble_level = value;
 }
 
 int8_t audio_eq_get_band(uint8_t band) {

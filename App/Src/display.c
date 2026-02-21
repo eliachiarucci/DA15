@@ -10,6 +10,7 @@
 #include "app.h"
 #include "audio_eq.h"
 #include "audio_output.h"
+#include "eq_profile.h"
 #include "sh1106.h"
 #include "stm32h5xx_hal.h"
 #include <stdint.h>
@@ -35,7 +36,36 @@ static uint8_t menu_blink_on = 1;
 static uint8_t menu_scroll = 0;
 
 static const char *menu_labels[] = {
-    "< BACK", "BASS", "TREBLE", "BRIGHTNESS", "DISP. TIMEOUT", "DFU UPDATE"};
+    "< BACK", "EQ PROFILE", "BASS", "TREBLE", "BRIGHTNESS", "DISP. TIMEOUT",
+    "DFU UPDATE"};
+
+// Returns true if the menu item should be shown
+static uint8_t is_menu_item_visible(uint8_t item) {
+  if (item == MENU_BASS || item == MENU_TREBLE)
+    return eq_profile_get_active() == EQ_PROFILE_OFF;
+  return 1;
+}
+
+// Build list of currently visible menu items
+static uint8_t visible_items[MENU_COUNT];
+static uint8_t visible_count;
+
+static void rebuild_visible_items(void) {
+  visible_count = 0;
+  for (uint8_t i = 0; i < MENU_COUNT; i++) {
+    if (is_menu_item_visible(i))
+      visible_items[visible_count++] = i;
+  }
+}
+
+// Map menu_cursor (actual item) to visible row index, or -1
+static int8_t cursor_to_visible_row(void) {
+  for (uint8_t i = 0; i < visible_count; i++) {
+    if (visible_items[i] == menu_cursor)
+      return (int8_t)i;
+  }
+  return -1;
+}
 
 // ---------------------------------------------------------------------------
 // Brightness
@@ -111,6 +141,10 @@ static void draw_volume_screen(void) {
 
 static void get_menu_value_str(uint8_t item, char *buf, uint8_t buf_size) {
   switch (item) {
+  case MENU_PROFILE: {
+    const char *name = eq_profile_get_active_name();
+    snprintf(buf, buf_size, "%.9s", name); // truncate for display
+  } break;
   case MENU_BASS: {
     int8_t v = audio_eq_get_band(EQ_BAND_BASS);
     if (v > 0)
@@ -138,37 +172,44 @@ static void get_menu_value_str(uint8_t item, char *buf, uint8_t buf_size) {
 }
 
 static void menu_update_scroll(void) {
-  if (menu_cursor < menu_scroll)
-    menu_scroll = menu_cursor;
-  else if (menu_cursor >= menu_scroll + MENU_VISIBLE)
-    menu_scroll = menu_cursor - MENU_VISIBLE + 1;
+  int8_t row = cursor_to_visible_row();
+  if (row < 0) row = 0;
+  if ((uint8_t)row < menu_scroll)
+    menu_scroll = (uint8_t)row;
+  else if ((uint8_t)row >= menu_scroll + MENU_VISIBLE)
+    menu_scroll = (uint8_t)row - MENU_VISIBLE + 1;
 }
 
 static void draw_menu_screen(void) {
   sh1106_clear();
   sh1106_set_font_scale(1);
 
+  rebuild_visible_items();
   menu_update_scroll();
-  uint8_t end = menu_scroll + MENU_VISIBLE;
-  if (end > MENU_COUNT)
-    end = MENU_COUNT;
 
-  for (uint8_t i = menu_scroll; i < end; i++) {
-    uint8_t y = MENU_Y_START + (i - menu_scroll) * MENU_ROW_H;
+  uint8_t end = menu_scroll + MENU_VISIBLE;
+  if (end > visible_count)
+    end = visible_count;
+
+  for (uint8_t vi = menu_scroll; vi < end; vi++) {
+    uint8_t item = visible_items[vi];
+    uint8_t y = MENU_Y_START + (vi - menu_scroll) * MENU_ROW_H;
 
     sh1106_set_cursor(2, y + 2);
-    sh1106_write_string(menu_labels[i]);
+    sh1106_write_string(menu_labels[item]);
 
-    if (i != MENU_BACK && i != MENU_DFU) {
-      char val[10];
-      get_menu_value_str(i, val, sizeof(val));
+    if (item != MENU_BACK && item != MENU_DFU) {
+      char val[12];
+      get_menu_value_str(item, val, sizeof(val));
       uint8_t vlen = (uint8_t)strlen(val);
-      uint8_t vx = SH1106_WIDTH - vlen * 6 - 2;
-      sh1106_set_cursor(vx, y + 2);
-      sh1106_write_string(val);
+      if (vlen > 0) {
+        uint8_t vx = SH1106_WIDTH - vlen * 6 - 2;
+        sh1106_set_cursor(vx, y + 2);
+        sh1106_write_string(val);
+      }
     }
 
-    if (i == menu_cursor) {
+    if (item == menu_cursor) {
       if (!menu_editing || menu_blink_on) {
         sh1106_invert_region(0, y, SH1106_WIDTH, MENU_ROW_H);
       }
@@ -252,7 +293,9 @@ void display_blink_tick(uint32_t now) {
     return;
   menu_blink_on ^= 1;
   menu_blink_tick = now;
-  uint8_t y = MENU_Y_START + (menu_cursor - menu_scroll) * MENU_ROW_H;
+  int8_t row = cursor_to_visible_row();
+  if (row < 0) return;
+  uint8_t y = MENU_Y_START + ((uint8_t)row - menu_scroll) * MENU_ROW_H;
   sh1106_invert_region(0, y, SH1106_WIDTH, MENU_ROW_H);
   sh1106_update();
 }
@@ -314,21 +357,24 @@ void display_menu_exit_edit(void) {
 }
 
 void display_menu_navigate(int8_t delta) {
-  int8_t c = (int8_t)menu_cursor + delta;
-  if (c < 0)
-    c = 0;
-  if (c >= MENU_COUNT)
-    c = MENU_COUNT - 1;
-  if ((uint8_t)c != menu_cursor) {
+  rebuild_visible_items();
+  int8_t cur_row = cursor_to_visible_row();
+  if (cur_row < 0) cur_row = 0;
+
+  int8_t new_row = cur_row + delta;
+  if (new_row < 0) new_row = 0;
+  if (new_row >= (int8_t)visible_count) new_row = (int8_t)visible_count - 1;
+
+  uint8_t new_item = visible_items[new_row];
+  if (new_item != menu_cursor) {
     uint8_t old_scroll = menu_scroll;
-    menu_cursor = (uint8_t)c;
+    menu_cursor = new_item;
     menu_update_scroll();
     if (menu_scroll != old_scroll) {
       display_dirty = 1;
     } else {
-      uint8_t old_y =
-          MENU_Y_START + ((uint8_t)c - delta - menu_scroll) * MENU_ROW_H;
-      uint8_t new_y = MENU_Y_START + ((uint8_t)c - menu_scroll) * MENU_ROW_H;
+      uint8_t old_y = MENU_Y_START + ((uint8_t)cur_row - menu_scroll) * MENU_ROW_H;
+      uint8_t new_y = MENU_Y_START + ((uint8_t)new_row - menu_scroll) * MENU_ROW_H;
       sh1106_invert_region(0, old_y, SH1106_WIDTH, MENU_ROW_H);
       sh1106_invert_region(0, new_y, SH1106_WIDTH, MENU_ROW_H);
       sh1106_update();

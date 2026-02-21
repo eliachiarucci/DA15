@@ -51,7 +51,7 @@ extern "C" {
 
 //------------- CLASS -------------//
 #define CFG_TUD_AUDIO             1
-#define CFG_TUD_CDC               0
+#define CFG_TUD_CDC               1
 #define CFG_TUD_MSC               0
 #define CFG_TUD_HID               0
 #define CFG_TUD_MIDI              0
@@ -106,6 +106,13 @@ extern "C" {
 
 // Control buffer size
 #define CFG_TUD_AUDIO_FUNC_1_CTRL_BUF_SZ               64
+
+//--------------------------------------------------------------------+
+// CDC CLASS DRIVER CONFIGURATION
+//--------------------------------------------------------------------+
+
+#define CFG_TUD_CDC_RX_BUFSIZE    512
+#define CFG_TUD_CDC_TX_BUFSIZE    512
 
 #ifdef __cplusplus
 }

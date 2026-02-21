@@ -57,6 +57,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     "App/Src/sh1106.c"
     "App/Src/encoder.c"
     "App/Src/settings.c"
+    "App/Src/eq_profile.c"
+    "App/Src/usb_comm.c"
 
     # SEGGER RTT
     "Lib/RTT/SEGGER_RTT.c"
@@ -73,6 +75,9 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
 
     # TinyUSB DFU Runtime class driver
     "${TINYUSB_PATH}/src/class/dfu/dfu_rt_device.c"
+
+    # TinyUSB CDC class driver
+    "${TINYUSB_PATH}/src/class/cdc/cdc_device.c"
 
     # TinyUSB STM32 FSDEV portable driver (for STM32H5)
     "${TINYUSB_PATH}/src/portable/st/stm32_fsdev/dcd_stm32_fsdev.c"
@@ -103,6 +108,7 @@ list(REMOVE_ITEM CMAKE_C_IMPLICIT_LINK_LIBRARIES ob)
 # Add linked libraries
 target_link_libraries(${CMAKE_PROJECT_NAME}
     stm32cubemx
+    m
 
     # Add user defined libraries
 )

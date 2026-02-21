@@ -44,7 +44,7 @@ uint8_t const* tud_descriptor_device_cb(void) {
 
 // Total length of configuration descriptor
 // 1 sample rate: 48kHz only
-#define CONFIG_TOTAL_LEN    (TUD_CONFIG_DESC_LEN + TUD_AUDIO10_SPEAKER_STEREO_FB_DESC_LEN(1) + TUD_DFU_RT_DESC_LEN)
+#define CONFIG_TOTAL_LEN    (TUD_CONFIG_DESC_LEN + TUD_AUDIO10_SPEAKER_STEREO_FB_DESC_LEN(1) + TUD_DFU_RT_DESC_LEN + TUD_CDC_DESC_LEN)
 
 static uint8_t const desc_configuration[] = {
     // Config number, interface count, string index, total length, attribute, power in mA
@@ -64,6 +64,9 @@ static uint8_t const desc_configuration[] = {
 
     // DFU Runtime Interface
     TUD_DFU_RT_DESCRIPTOR(ITF_NUM_DFU, 5, DFU_ATTR_WILL_DETACH, 1000, 0),
+
+    // CDC Interface (for EQ profile management)
+    TUD_CDC_DESCRIPTOR(ITF_NUM_CDC, 6, EPNUM_CDC_NOTIF, 8, EPNUM_CDC_OUT, EPNUM_CDC_IN, 64),
 };
 
 // Verify descriptor size
@@ -87,6 +90,7 @@ enum {
     STRID_SERIAL,
     STRID_AUDIO_ITF,
     STRID_DFU_RT,
+    STRID_CDC,
 };
 
 // Array of pointer to string descriptors
@@ -97,6 +101,7 @@ static char const* string_desc_arr[] = {
     "000000000001",                 // 3: Serial number
     "DA15",                         // 4: Audio Interface
     "DFU Runtime",                  // 5: DFU Runtime Interface
+    "DA15 EQ Config",               // 6: CDC Interface
 };
 
 static uint16_t _desc_str[32 + 1];

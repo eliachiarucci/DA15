@@ -6,7 +6,7 @@
  *
  * Uses the last flash sector (8KB at 0x0801E000) for sequential record writing.
  * Each record is 16 bytes (quad-word aligned):
- *   [magic, volume, muted, bass, treble, brightness, timeout, checksum, 0xFF x8]
+ *   [magic, volume, muted, bass, treble, brightness, timeout, profile, checksum, 0xFF x7]
  * Records are appended sequentially; when the sector is full it is erased.
  * On load, the last valid record is used.
  *
@@ -105,15 +105,15 @@ bool settings_load(settings_t *out) {
 
         if (magic != RECORD_MAGIC) continue;
 
-        // Checksum covers bytes 0-6, stored in byte 7
-        uint8_t cksum = compute_checksum(rec, 7);
+        // Checksum covers bytes 0-7, stored in byte 8
+        uint8_t cksum = compute_checksum(rec, 8);
         if (settings_ecc_error) {
             SEGGER_RTT_printf(0, "[settings] ECC error at record %d, erasing sector\n", i);
             erase_settings_page();
             settings_ecc_error = 0;
             return false;
         }
-        if (cksum != rec[7]) continue;
+        if (cksum != rec[8]) continue;
 
         out->local_volume    = rec[1];
         out->local_muted     = rec[2];
@@ -121,6 +121,7 @@ bool settings_load(settings_t *out) {
         out->treble          = (int8_t)rec[4];
         out->brightness      = rec[5];
         out->display_timeout = rec[6];
+        out->active_profile  = rec[7];
         return true;
     }
 
@@ -140,7 +141,7 @@ bool settings_save(const settings_t *s) {
     uint32_t addr = SETTINGS_PAGE_ADDR + (uint32_t)slot * RECORD_SIZE;
 
     // Build 16-byte quad-word aligned record
-    // [magic, volume, muted, bass, treble, brightness, timeout, checksum, pad x8]
+    // [magic, volume, muted, bass, treble, brightness, timeout, profile, checksum, pad x7]
     uint8_t rec[RECORD_SIZE];
     rec[0] = RECORD_MAGIC;
     rec[1] = s->local_volume;
@@ -149,9 +150,10 @@ bool settings_save(const settings_t *s) {
     rec[4] = (uint8_t)s->treble;
     rec[5] = s->brightness;
     rec[6] = s->display_timeout;
-    rec[7] = compute_checksum(rec, 7);
+    rec[7] = s->active_profile;
+    rec[8] = compute_checksum(rec, 8);
     // Pad remaining bytes with 0xFF (erased state)
-    for (uint8_t i = 8; i < RECORD_SIZE; i++)
+    for (uint8_t i = 9; i < RECORD_SIZE; i++)
         rec[i] = ERASED_BYTE;
 
     // STM32H5 programs in quad-words (128 bits = 16 bytes)

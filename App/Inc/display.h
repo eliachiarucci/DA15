@@ -17,6 +17,7 @@ typedef enum {
 
 typedef enum {
   MENU_BACK = 0,
+  MENU_PROFILE,
   MENU_BASS,
   MENU_TREBLE,
   MENU_BRIGHTNESS,

@@ -12,11 +12,13 @@
 #include "audio_output.h"
 #include "display.h"
 #include "encoder.h"
+#include "eq_profile.h"
 #include "main.h"
 #include "settings.h"
 #include "sh1106.h"
 #include "stm32h5xx_hal.h"
 #include "tusb.h"
+#include "usb_comm.h"
 #include <stdint.h>
 
 // External handles from main.c
@@ -182,6 +184,59 @@ static void handle_encoder_rotate(int8_t delta, uint32_t now) {
       display_menu_navigate(delta);
     } else {
       switch (display_get_menu_cursor()) {
+      case MENU_PROFILE: {
+        uint8_t active = eq_profile_get_active();
+        if (delta > 0) {
+          // OFF → first profile → next → ... → OFF
+          if (active == EQ_PROFILE_OFF) {
+            // Find first non-empty profile
+            for (uint8_t i = 0; i < EQ_MAX_PROFILES; i++) {
+              if (eq_profile_get(i) != NULL) {
+                active = i;
+                break;
+              }
+            }
+          } else {
+            // Find next non-empty profile, wrap to OFF
+            uint8_t found = 0;
+            for (uint8_t i = active + 1; i < EQ_MAX_PROFILES; i++) {
+              if (eq_profile_get(i) != NULL) {
+                active = i;
+                found = 1;
+                break;
+              }
+            }
+            if (!found)
+              active = EQ_PROFILE_OFF;
+          }
+        } else {
+          // Reverse: OFF ← first ← next ← ... ← OFF
+          if (active == EQ_PROFILE_OFF) {
+            // Find last non-empty profile
+            for (int8_t i = EQ_MAX_PROFILES - 1; i >= 0; i--) {
+              if (eq_profile_get((uint8_t)i) != NULL) {
+                active = (uint8_t)i;
+                break;
+              }
+            }
+          } else {
+            // Find previous non-empty profile, wrap to OFF
+            uint8_t found = 0;
+            for (int8_t i = (int8_t)active - 1; i >= 0; i--) {
+              if (eq_profile_get((uint8_t)i) != NULL) {
+                active = (uint8_t)i;
+                found = 1;
+                break;
+              }
+            }
+            if (!found)
+              active = EQ_PROFILE_OFF;
+          }
+        }
+        eq_profile_set_active(active);
+        mark_settings_dirty(now);
+        display_set_dirty();
+      } break;
       case MENU_BASS: {
         int8_t v = (int8_t)clamp_i16(audio_eq_get_band(EQ_BAND_BASS) + delta,
                                       EQ_VALUE_MIN, EQ_VALUE_MAX);
@@ -244,6 +299,13 @@ void app_init(void) {
   audio_eq_set_band(EQ_BAND_BASS, 0);
   audio_eq_set_band(EQ_BAND_TREBLE, 0);
 
+  // Initialize EQ profile store (load from flash)
+  SEGGER_RTT_printf(0, "[init] EQ profiles init...\n");
+  eq_profile_init();
+
+  // Initialize USB CDC communication
+  usb_comm_init();
+
   // Initialize encoder
   encoder_init();
   SEGGER_RTT_printf(0, "[init] encoder done\n");
@@ -264,6 +326,7 @@ void app_init(void) {
     audio_eq_set_band(EQ_BAND_TREBLE, saved.treble);
     brightness = saved.brightness;
     timeout = saved.display_timeout;
+    eq_profile_set_active(saved.active_profile);
   } else {
     SEGGER_RTT_printf(0, "[init] no valid settings, using defaults\n");
   }
@@ -284,6 +347,7 @@ void app_loop(void) {
   // --- High priority: USB + audio ---
   tud_task();
   audio_output_task();
+  usb_comm_task();
 
   // --- USB connection monitoring (idle screen for OLED burn-in protection) ---
   // Any USB state change must hold stable for 3s before taking effect.
@@ -339,6 +403,7 @@ void app_loop(void) {
         .treble = audio_eq_get_band(EQ_BAND_TREBLE),
         .brightness = display_get_brightness(),
         .display_timeout = display_get_timeout_level(),
+        .active_profile = eq_profile_get_active(),
     };
     settings_save(&s);
     settings_dirty = 0;

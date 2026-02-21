@@ -17,15 +17,20 @@ enum {
   ITF_NUM_AUDIO_CONTROL = 0,
   ITF_NUM_AUDIO_STREAMING,
   ITF_NUM_DFU,
+  ITF_NUM_CDC,
+  ITF_NUM_CDC_DATA,
   ITF_NUM_TOTAL
 };
 
 //--------------------------------------------------------------------+
 // Endpoint Numbers
 //--------------------------------------------------------------------+
-// STM32F0 can use same endpoint number for IN and OUT
+// STM32H5 can use same endpoint number for IN and OUT
 #define EPNUM_AUDIO_OUT       0x01
 #define EPNUM_AUDIO_FB        0x81  // 0x01 | 0x80 (IN direction)
+#define EPNUM_CDC_NOTIF       0x82  // CDC notification (IN)
+#define EPNUM_CDC_OUT         0x03  // CDC data (OUT)
+#define EPNUM_CDC_IN          0x83  // CDC data (IN)
 
 //--------------------------------------------------------------------+
 // UAC1 Entity IDs (used in TUD_AUDIO10_SPEAKER_STEREO_FB_DESCRIPTOR)

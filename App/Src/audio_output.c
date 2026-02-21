@@ -11,6 +11,7 @@
 #include "SEGGER_RTT.h"
 #include "app.h"
 #include "audio_eq.h"
+#include "eq_profile.h"
 #include "main.h"
 #include "sh1106.h"
 #include "stm32h5xx_hal.h"
@@ -235,7 +236,10 @@ static uint16_t read_audio_data(uint16_t *i2s_dest,
 #endif
 
   // EQ + volume processing (operates on 24-bit values in int32_t)
-  audio_eq_process(proc, sample_count, get_volume_scale());
+  if (eq_profile_get_active() != EQ_PROFILE_OFF)
+    eq_profile_process(proc, sample_count, get_volume_scale());
+  else
+    audio_eq_process(proc, sample_count, get_volume_scale());
 
   // Save last samples before packing (pack overwrites the int32_t data
   // in-place)
@@ -303,6 +307,7 @@ void audio_output_start_streaming(void) {
 
   // Reset EQ filter state to avoid transient spikes from stale filter memory
   audio_eq_reset_state();
+  eq_profile_reset_state();
 
   // Clear buffer with silence
   memset(i2s_buffer, 0, sizeof(i2s_buffer));
