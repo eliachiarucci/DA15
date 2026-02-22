@@ -9,6 +9,7 @@
  */
 
 #include "usb_comm.h"
+#include "app.h"
 #include "eq_profile.h"
 #include "tusb.h"
 #include <string.h>
@@ -185,6 +186,12 @@ static void handle_set_active(void) {
     send_ok(CMD_SET_ACTIVE, NULL, 0);
 }
 
+static void handle_enter_dfu(void) {
+    send_ok(CMD_ENTER_DFU, NULL, 0);
+    tud_cdc_write_flush();
+    app_reboot_to_dfu();
+}
+
 static void handle_save_to_flash(void) {
     if (!eq_profile_start_flash_save()) {
         send_error(CMD_SAVE_TO_FLASH, STATUS_ERR_FLASH);
@@ -207,6 +214,7 @@ static void dispatch_command(void) {
     case CMD_DELETE_PROFILE:    handle_delete_profile();    break;
     case CMD_SET_ACTIVE:        handle_set_active();       break;
     case CMD_SAVE_TO_FLASH:     handle_save_to_flash();    break;
+    case CMD_ENTER_DFU:         handle_enter_dfu();        break;
     default:
         send_error(rx_cmd, STATUS_ERR_INVALID_CMD);
         break;
