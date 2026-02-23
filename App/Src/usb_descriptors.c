@@ -14,7 +14,7 @@
 static tusb_desc_device_t const desc_device = {
     .bLength            = sizeof(tusb_desc_device_t),
     .bDescriptorType    = TUSB_DESC_DEVICE,
-    .bcdUSB             = 0x0200,
+    .bcdUSB             = 0x0210,
 
     // Use Interface Association Descriptor (IAD) for Audio
     .bDeviceClass       = TUSB_CLASS_MISC,
@@ -44,11 +44,15 @@ uint8_t const* tud_descriptor_device_cb(void) {
 
 // Total length of configuration descriptor
 // 1 sample rate: 48kHz only
-#define CONFIG_TOTAL_LEN    (TUD_CONFIG_DESC_LEN + TUD_AUDIO10_SPEAKER_STEREO_FB_DESC_LEN(1) + TUD_DFU_RT_DESC_LEN + TUD_CDC_DESC_LEN)
+#define TUD_AUDIO_DESC_IAD_LEN  8
+#define CONFIG_TOTAL_LEN    (TUD_CONFIG_DESC_LEN + TUD_AUDIO_DESC_IAD_LEN + TUD_AUDIO10_SPEAKER_STEREO_FB_DESC_LEN(1) + TUD_DFU_RT_DESC_LEN + TUD_CDC_DESC_LEN)
 
 static uint8_t const desc_configuration[] = {
     // Config number, interface count, string index, total length, attribute, power in mA
     TUD_CONFIG_DESCRIPTOR(1, ITF_NUM_TOTAL, 0, CONFIG_TOTAL_LEN, 0x00, 100),
+
+    // Audio Interface Association Descriptor — groups Audio Control + Audio Streaming
+    TUD_AUDIO_DESC_IAD_LEN, TUSB_DESC_INTERFACE_ASSOCIATION, ITF_NUM_AUDIO_CONTROL, 2, TUSB_CLASS_AUDIO, 0x00, 0x00, 4,
 
     // Interface number, string index, byte per sample, bit per sample, EP Out, EP size, EP feedback, sample rates
     TUD_AUDIO10_SPEAKER_STEREO_FB_DESCRIPTOR(
@@ -76,6 +80,70 @@ TU_VERIFY_STATIC(sizeof(desc_configuration) == CONFIG_TOTAL_LEN, "Incorrect conf
 uint8_t const* tud_descriptor_configuration_cb(uint8_t index) {
     (void) index;
     return desc_configuration;
+}
+
+//--------------------------------------------------------------------+
+// BOS & MS OS 2.0 Descriptors (Windows driver binding)
+//--------------------------------------------------------------------+
+
+#define MS_OS_20_DESC_LEN  42
+
+static uint8_t const desc_ms_os_20[] = {
+    // Microsoft OS 2.0 Descriptor Set Header (10 bytes)
+    U16_TO_U8S_LE(0x000A),                         // wLength
+    U16_TO_U8S_LE(MS_OS_20_SET_HEADER_DESCRIPTOR),  // wDescriptorType
+    U32_TO_U8S_LE(0x06030000),                      // dwWindowsVersion (Windows 8.1+)
+    U16_TO_U8S_LE(MS_OS_20_DESC_LEN),               // wTotalLength
+
+    // Microsoft OS 2.0 CCGP Device Feature Descriptor (4 bytes)
+    // Tells Windows to use composite device driver (usbccgp.sys)
+    U16_TO_U8S_LE(0x0004),                          // wLength
+    U16_TO_U8S_LE(MS_OS_20_FEATURE_CCGP_DEVICE),    // wDescriptorType
+
+    // Microsoft OS 2.0 Function Subset Header - DFU (8 bytes)
+    U16_TO_U8S_LE(0x0008),                          // wLength
+    U16_TO_U8S_LE(MS_OS_20_SUBSET_HEADER_FUNCTION), // wDescriptorType
+    ITF_NUM_DFU,                                     // bFirstInterface
+    0x00,                                            // bReserved
+    U16_TO_U8S_LE(0x0008 + 0x0014),                 // wSubsetLength (header + compatible ID)
+
+    // Microsoft OS 2.0 Compatible ID Descriptor for DFU - WINUSB (20 bytes)
+    U16_TO_U8S_LE(0x0014),                          // wLength
+    U16_TO_U8S_LE(MS_OS_20_FEATURE_COMPATBLE_ID),   // wDescriptorType
+    'W', 'I', 'N', 'U', 'S', 'B', 0x00, 0x00,      // CompatibleID
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // SubCompatibleID
+
+    // CDC ACM (ITF_NUM_CDC) is left without a function subset —
+    // Windows 10 1703+ auto-detects CDC ACM by class/subclass/protocol
+    // and loads usbser.sys via built-in class driver matching.
+};
+
+TU_VERIFY_STATIC(sizeof(desc_ms_os_20) == MS_OS_20_DESC_LEN, "Incorrect MS OS 2.0 descriptor size");
+
+#define BOS_TOTAL_LEN  (TUD_BOS_DESC_LEN + TUD_BOS_MICROSOFT_OS_DESC_LEN)
+
+static uint8_t const desc_bos[] = {
+    TUD_BOS_DESCRIPTOR(BOS_TOTAL_LEN, 1),
+    TUD_BOS_MS_OS_20_DESCRIPTOR(MS_OS_20_DESC_LEN, VENDOR_REQUEST_MICROSOFT),
+};
+
+TU_VERIFY_STATIC(sizeof(desc_bos) == BOS_TOTAL_LEN, "Incorrect BOS descriptor size");
+
+// Invoked when received GET BOS DESCRIPTOR request
+uint8_t const* tud_descriptor_bos_cb(void) {
+    return desc_bos;
+}
+
+// Invoked when received control request with VENDOR TYPE
+bool tud_vendor_control_xfer_cb(uint8_t rhport, uint8_t stage, tusb_control_request_t const* request) {
+    if (request->bRequest == VENDOR_REQUEST_MICROSOFT && request->wIndex == 7) {
+        // MS OS 2.0 descriptor request
+        if (stage == CONTROL_STAGE_SETUP) {
+            return tud_control_xfer(rhport, request, (void*)(uintptr_t)desc_ms_os_20, sizeof(desc_ms_os_20));
+        }
+        return true;
+    }
+    return false;
 }
 
 //--------------------------------------------------------------------+
