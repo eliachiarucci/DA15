@@ -22,6 +22,7 @@
 #define CMD_DELETE_PROFILE    0x05
 #define CMD_SET_ACTIVE        0x06
 #define CMD_SAVE_TO_FLASH     0x07
+#define CMD_ENTER_DFU         0x08
 
 // Response status codes
 #define STATUS_OK             0x00
