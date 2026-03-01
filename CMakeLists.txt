@@ -37,6 +37,9 @@ add_executable(${CMAKE_PROJECT_NAME})
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)
 
+# CubeMX bug: EXTERNAL_CLOCK_VALUE defaults to 12288000 instead of 24576000
+target_compile_definitions(stm32cubemx INTERFACE EXTERNAL_CLOCK_VALUE=24576000UL)
+
 # TinyUSB paths
 set(TINYUSB_PATH "${CMAKE_CURRENT_SOURCE_DIR}/Lib/tinyusb")
 

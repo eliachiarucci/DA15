@@ -123,6 +123,19 @@ void tud_dfu_runtime_reboot_to_dfu_cb(void) { app_reboot_to_dfu(); }
 // ---------------------------------------------------------------------------
 // Settings helper
 // ---------------------------------------------------------------------------
+void app_save_settings(void) {
+  settings_t s = {
+      .local_volume = audio_output_get_local_volume(),
+      .local_muted = audio_output_is_local_muted(),
+      .bass = audio_eq_get_band(EQ_BAND_BASS),
+      .treble = audio_eq_get_band(EQ_BAND_TREBLE),
+      .brightness = display_get_brightness(),
+      .display_timeout = display_get_timeout_level(),
+      .active_profile = eq_profile_get_active(),
+  };
+  settings_save(&s);
+}
+
 static void mark_settings_dirty(uint32_t now) {
   settings_dirty = 1;
   settings_save_tick = now;
@@ -407,16 +420,7 @@ void app_loop(void) {
 
   // --- Debounced settings save ---
   if (settings_dirty && (now - settings_save_tick >= SETTINGS_SAVE_DELAY_MS)) {
-    settings_t s = {
-        .local_volume = audio_output_get_local_volume(),
-        .local_muted = audio_output_is_local_muted(),
-        .bass = audio_eq_get_band(EQ_BAND_BASS),
-        .treble = audio_eq_get_band(EQ_BAND_TREBLE),
-        .brightness = display_get_brightness(),
-        .display_timeout = display_get_timeout_level(),
-        .active_profile = eq_profile_get_active(),
-    };
-    settings_save(&s);
+    app_save_settings();
     settings_dirty = 0;
   }
 

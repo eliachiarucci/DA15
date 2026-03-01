@@ -16,6 +16,7 @@
 #include "usb_descriptors.h"
 #include "stm32h5xx_hal.h"
 #include "tusb.h"
+#include <stdio.h>
 #include <string.h>
 
 // ---------------------------------------------------------------------------
@@ -101,13 +102,16 @@ static void send_error(uint8_t cmd, uint8_t status) {
 // Command handlers
 // ---------------------------------------------------------------------------
 static void handle_get_device_info(void) {
-    uint8_t resp[6];
-    resp[0] = FW_VERSION_MAJOR;
-    resp[1] = FW_VERSION_MINOR;
-    resp[2] = FW_VERSION_PATCH;
-    resp[3] = EQ_MAX_PROFILES;
-    resp[4] = EQ_MAX_FILTERS;
-    resp[5] = eq_profile_get_active();
+    uint8_t resp[9];
+    resp[0] = HW_MODEL;
+    resp[1] = HW_VERSION_MAJOR;
+    resp[2] = HW_VERSION_MINOR;
+    resp[3] = FW_VERSION_MAJOR;
+    resp[4] = FW_VERSION_MINOR;
+    resp[5] = FW_VERSION_PATCH;
+    resp[6] = EQ_MAX_PROFILES;
+    resp[7] = EQ_MAX_FILTERS;
+    resp[8] = eq_profile_get_active();
     send_ok(CMD_GET_DEVICE_INFO, resp, sizeof(resp));
 }
 
@@ -128,6 +132,11 @@ static void handle_get_profile_list(void) {
     }
     resp[0] = count;
     send_ok(CMD_GET_PROFILE_LIST, resp, pos);
+}
+
+static void handle_get_active(void) {
+    uint8_t id = eq_profile_get_active();
+    send_ok(CMD_GET_ACTIVE, &id, 1);
 }
 
 static void handle_get_profile(void) {
@@ -187,6 +196,7 @@ static void handle_set_active(void) {
 
     uint8_t id = rx_buf[0];
     eq_profile_set_active(id);
+    app_save_settings();
     send_ok(CMD_SET_ACTIVE, NULL, 0);
 }
 
@@ -209,7 +219,6 @@ static void handle_set_manufacturer(void) {
     memcpy(str, rx_buf, rx_len);
     str[rx_len] = '\0';
     usb_desc_set_manufacturer(str);
-    settings_save_strings(usb_desc_get_manufacturer(), usb_desc_get_product(), usb_desc_get_audio_itf());
     send_ok(CMD_SET_MANUFACTURER, NULL, 0);
 }
 
@@ -222,7 +231,6 @@ static void handle_set_product(void) {
     memcpy(str, rx_buf, rx_len);
     str[rx_len] = '\0';
     usb_desc_set_product(str);
-    settings_save_strings(usb_desc_get_manufacturer(), usb_desc_get_product(), usb_desc_get_audio_itf());
     send_ok(CMD_SET_PRODUCT, NULL, 0);
 }
 
@@ -240,7 +248,6 @@ static void handle_set_audio_itf(void) {
     memcpy(str, rx_buf, rx_len);
     str[rx_len] = '\0';
     usb_desc_set_audio_itf(str);
-    settings_save_strings(usb_desc_get_manufacturer(), usb_desc_get_product(), usb_desc_get_audio_itf());
     send_ok(CMD_SET_AUDIO_ITF, NULL, 0);
 }
 
@@ -248,6 +255,21 @@ static void handle_enter_dfu(void) {
     send_ok(CMD_ENTER_DFU, NULL, 0);
     tud_cdc_write_flush();
     app_reboot_to_dfu();
+}
+
+static void handle_get_dfu_serial(void) {
+    // H5 UID_BASE (0x08FFF800) is in user-flash range — requires MPU region
+    // with non-cacheable attribute to avoid HardFault when ICACHE is enabled.
+    // DFU bootloader serial (same algorithm as F2/F4): 8 hex of (UID0+UID2),
+    // then 4 hex of (UID1 >> 16) = 12 uppercase hex chars.
+    uint32_t uid0 = HAL_GetUIDw0();
+    uint32_t uid1 = HAL_GetUIDw1();
+    uint32_t uid2 = HAL_GetUIDw2();
+
+    char serial[13];
+    snprintf(serial, sizeof(serial), "%08lX%04lX",
+             (unsigned long)(uid0 + uid2), (unsigned long)(uid1 >> 16));
+    send_ok(CMD_GET_DFU_SERIAL, (const uint8_t *)serial, 12);
 }
 
 static void handle_get_dac(void) {
@@ -279,6 +301,14 @@ static void handle_set_amp(void) {
 }
 
 static void handle_reboot(void) {
+    // Persist any pending string changes to flash before resetting
+    if (!settings_save_strings(usb_desc_get_manufacturer(),
+                               usb_desc_get_product(),
+                               usb_desc_get_audio_itf())) {
+        send_error(CMD_REBOOT, STATUS_ERR_FLASH);
+        return;
+    }
+
     send_ok(CMD_REBOOT, NULL, 0);
     tud_cdc_write_flush();
     uint32_t deadline = HAL_GetTick() + 20;
@@ -304,6 +334,7 @@ static void dispatch_command(void) {
     switch (rx_cmd) {
     case CMD_GET_DEVICE_INFO:   handle_get_device_info();  break;
     case CMD_GET_PROFILE_LIST:  handle_get_profile_list(); break;
+    case CMD_GET_ACTIVE:        handle_get_active();       break;
     case CMD_GET_PROFILE:       handle_get_profile();      break;
     case CMD_SET_PROFILE:       handle_set_profile();      break;
     case CMD_DELETE_PROFILE:    handle_delete_profile();    break;
@@ -320,6 +351,7 @@ static void dispatch_command(void) {
     case CMD_SET_DAC:           handle_set_dac();          break;
     case CMD_SET_AMP:           handle_set_amp();          break;
     case CMD_ENTER_DFU:         handle_enter_dfu();        break;
+    case CMD_GET_DFU_SERIAL:    handle_get_dfu_serial();   break;
     case CMD_REBOOT:            handle_reboot();           break;
     default:
         send_error(rx_cmd, STATUS_ERR_INVALID_CMD);

@@ -15,4 +15,7 @@ uint8_t app_get_power_level(void);
 // Reboot into STM32 system bootloader (USB DFU mode)
 void app_reboot_to_dfu(void);
 
+// Save current settings (volume, EQ, active profile, etc.) to flash immediately
+void app_save_settings(void);
+
 #endif

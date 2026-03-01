@@ -62,15 +62,24 @@ function crc8(data) {
 
 **Request payload:** (none, LEN=0)
 
-**Response payload (6 bytes):**
+**Response payload (9 bytes):**
 | Offset | Type | Field |
 |--------|------|-------|
-| 0 | uint8 | fw_version_major |
-| 1 | uint8 | fw_version_minor |
-| 2 | uint8 | fw_version_patch |
-| 3 | uint8 | max_profiles (10) |
-| 4 | uint8 | max_filters_per_profile (10) |
-| 5 | uint8 | active_profile_id (0-9, or 0xFF=OFF) |
+| 0 | uint8 | hw_model (1=DA15) |
+| 1 | uint8 | hw_version_major |
+| 2 | uint8 | hw_version_minor |
+| 3 | uint8 | fw_version_major |
+| 4 | uint8 | fw_version_minor |
+| 5 | uint8 | fw_version_patch |
+| 6 | uint8 | max_profiles (10) |
+| 7 | uint8 | max_filters_per_profile (10) |
+| 8 | uint8 | active_profile_id (0-9, or 0xFF=OFF) |
+
+**hw_model values:**
+| Value | Model |
+|-------|-------|
+| 1 | DA15 |
+| 2 | HA1 |
 
 ### 0x02 — GET_PROFILE_LIST
 
@@ -84,7 +93,13 @@ function crc8(data) {
 
 Each entry is 17 bytes: 1 byte slot ID (0-9) + 16 bytes null-terminated name. Only non-empty slots are included.
 
-### 0x03 — GET_PROFILE
+### 0x03 — GET_ACTIVE
+
+**Request payload:** (none, LEN=0)
+
+**Response payload (1 byte):** `[active_profile_id:1]` (0-9 for a profile, `0xFF` for OFF).
+
+### 0x04 — GET_PROFILE
 
 **Request payload (1 byte):** `[profile_id:1]`
 
@@ -92,25 +107,25 @@ Each entry is 17 bytes: 1 byte slot ID (0-9) + 16 bytes null-terminated name. On
 
 Returns `ERR_INVALID_PARAM` if the slot is empty or ID >= 10.
 
-### 0x04 — SET_PROFILE
+### 0x05 — SET_PROFILE
 
 **Request payload (381 bytes):** `[profile_id:1] [eq_profile_t:380]`
 
 Writes a profile to the specified slot **in RAM only**. Call `SAVE_TO_FLASH` afterward to persist. Returns `ERR_INVALID_PARAM` if ID >= 10.
 
-### 0x05 — DELETE_PROFILE
+### 0x06 — DELETE_PROFILE
 
 **Request payload (1 byte):** `[profile_id:1]`
 
 Clears the profile slot **in RAM only**. Call `SAVE_TO_FLASH` to persist. If the deleted profile was active, the device switches to OFF. Returns `ERR_INVALID_PARAM` if ID >= 10.
 
-### 0x06 — SET_ACTIVE
+### 0x07 — SET_ACTIVE
 
 **Request payload (1 byte):** `[profile_id:1]` (0-9 for a profile, `0xFF` for OFF)
 
 Takes effect immediately — the device switches EQ processing to the selected profile (or back to legacy bass/treble if OFF). The active profile is also persisted in the device's settings sector automatically.
 
-### 0x07 — SAVE_TO_FLASH
+### 0x08 — SAVE_TO_FLASH
 
 **Request payload:** (none, LEN=0)
 
@@ -138,19 +153,19 @@ Erases the profile flash sector and writes all current profiles from RAM. Return
 
 **Request payload (1–32 bytes):** Raw ASCII string (no null terminator required).
 
-Overrides the USB manufacturer string descriptor at runtime. Takes effect on the next descriptor request from the host (requires re-enumeration to be visible to the OS). Returns `ERR_INVALID_PARAM` if the payload is empty or longer than 32 bytes.
+Overrides the USB manufacturer string descriptor **in RAM only**. Takes effect on the next descriptor request from the host (requires re-enumeration to be visible to the OS). Call `REBOOT` to persist all string changes to flash. Returns `ERR_INVALID_PARAM` if the payload is empty or longer than 32 bytes.
 
 ### 0x86 — SET_PRODUCT
 
 **Request payload (1–32 bytes):** Raw ASCII string (no null terminator required).
 
-Overrides the USB product string descriptor at runtime. Same re-enumeration caveat as `SET_MANUFACTURER`. Returns `ERR_INVALID_PARAM` if the payload is empty or longer than 32 bytes.
+Overrides the USB product string descriptor **in RAM only**. Same re-enumeration caveat as `SET_MANUFACTURER`. Call `REBOOT` to persist all string changes to flash. Returns `ERR_INVALID_PARAM` if the payload is empty or longer than 32 bytes.
 
 ### 0x87 — SET_AUDIO_ITF
 
 **Request payload (1–32 bytes):** Raw ASCII string (no null terminator required).
 
-Overrides the USB audio interface string descriptor at runtime. Same re-enumeration caveat as `SET_MANUFACTURER`. The new value is persisted to flash alongside the manufacturer and product strings. Returns `ERR_INVALID_PARAM` if the payload is empty or longer than 32 bytes.
+Overrides the USB audio interface string descriptor **in RAM only**. Same re-enumeration caveat as `SET_MANUFACTURER`. Call `REBOOT` to persist all string changes to flash. Returns `ERR_INVALID_PARAM` if the payload is empty or longer than 32 bytes.
 
 ### 0x90 — ENTER_DFU
 
@@ -158,31 +173,37 @@ Overrides the USB audio interface string descriptor at runtime. Same re-enumerat
 
 Sends an OK response, then reboots the device into the STM32 system bootloader (DFU mode). The device re-enumerates as a DFU device for firmware flashing via `dfu-util`.
 
-### 0x91 — REBOOT
+### 0x91 — GET_DFU_SERIAL
 
 **Request payload:** (none, LEN=0)
 
-Sends an OK response, then performs a clean system reset via `NVIC_SystemReset()`. The device re-enumerates normally.
+**Response payload (12 bytes):** The DFU bootloader serial as 12 uppercase ASCII hex characters, derived from the 96-bit UID: 8 hex digits of `(UID0 + UID2)` followed by 4 hex digits of `(UID1 >> 16)`. Can be passed to `dfu-util -S <serial>` to target a specific device.
 
-### 0x92 — GET_DAC
+### 0x92 — REBOOT
+
+**Request payload:** (none, LEN=0)
+
+Persists any pending USB string descriptor changes (manufacturer, product, audio interface) to flash, then sends an OK response and performs a clean system reset via `NVIC_SystemReset()`. The device re-enumerates normally. Returns `ERR_FLASH` if the flash write fails (no reboot occurs).
+
+### 0x93 — GET_DAC
 
 **Request payload:** (none, LEN=0)
 
 **Response payload (1 byte):** `0x00` = DAC muted (off), `0x01` = DAC unmuted (on).
 
-### 0x93 — GET_AMP
+### 0x94 — GET_AMP
 
 **Request payload:** (none, LEN=0)
 
 **Response payload (1 byte):** `0x00` = amplifier disabled (off), `0x01` = amplifier enabled (on).
 
-### 0x94 — SET_DAC
+### 0x95 — SET_DAC
 
 **Request payload (1 byte):** `[enable:1]` — `0x00` = off (mute DAC), `0x01` = on (unmute DAC).
 
 Directly controls the DAC mute GPIO. Returns `ERR_INVALID_PARAM` if the value is not 0 or 1.
 
-### 0x95 — SET_AMP
+### 0x96 — SET_AMP
 
 **Request payload (1 byte):** `[enable:1]` — `0x00` = off (disable amplifier), `0x01` = on (enable amplifier).
 
@@ -269,8 +290,8 @@ const packet = Buffer.concat([frame, Buffer.from([crcByte])]);
 // packet = [0x01, 0x00, 0x00, 0x79]
 
 // Send over serial port, then read response:
-// [0x81, 0x07, 0x00, 0x00, 0x02, 0x00, 0x00, 0x0A, 0x0A, 0xFF, <crc>]
-//  ^CMD|0x80   ^LEN=7       ^OK  ^v2.0.0      ^10   ^10   ^OFF
+// [0x81, 0x0A, 0x00, 0x00, 0x01, 0x01, 0x00, 0x01, 0x00, 0x00, 0x0A, 0x0A, 0xFF, <crc>]
+//  ^CMD|0x80   ^LEN=10      ^OK  ^hw1  ^v1.0       ^fw1.0.0          ^10   ^10   ^OFF
 ```
 
 ## Example: Uploading a Profile
@@ -304,14 +325,14 @@ filter.copy(profile, 20);         // first filter at offset 20
 // Build SET_PROFILE request: [cmd] [len_lo] [len_hi] [id] [profile...] [crc]
 const id = 0; // slot 0
 const payload = Buffer.concat([Buffer.from([id]), profile]); // 381 bytes
-const header = Buffer.from([0x04, payload.length & 0xFF, (payload.length >> 8) & 0xFF]);
+const header = Buffer.from([0x05, payload.length & 0xFF, (payload.length >> 8) & 0xFF]);
 const fullFrame = Buffer.concat([header, payload]);
 const crc = crc8(fullFrame);
 const packet = Buffer.concat([fullFrame, Buffer.from([crc])]);
 
-// Send packet, expect response: [0x84, 0x01, 0x00, 0x00, <crc>]
+// Send packet, expect response: [0x85, 0x01, 0x00, 0x00, <crc>]
 //                                 ^CMD   ^LEN=1     ^OK
 
 // Then persist:
-// SAVE_TO_FLASH: [0x07, 0x00, 0x00, <crc>]
+// SAVE_TO_FLASH: [0x08, 0x00, 0x00, <crc>]
 ```

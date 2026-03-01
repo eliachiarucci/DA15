@@ -140,10 +140,23 @@ bool settings_save(const settings_t *s) {
     int slot = find_next_free_slot();
 
     if (slot < 0) {
+        // Preserve strings across sector erase: read them before wiping
+        char mfr[33], prod[33], audio_itf[33];
+        bool had_strings = settings_load_strings(mfr, prod, audio_itf);
+
         if (!erase_settings_page()) {
             return false;
         }
         slot = 0;
+
+        // Re-write strings so they survive the erase
+        if (had_strings) {
+            if (!settings_save_strings(mfr, prod, audio_itf))
+                return false;
+            slot = find_next_free_slot();
+            if (slot < 0)
+                return false;
+        }
     }
 
     uint32_t addr = SETTINGS_PAGE_ADDR + (uint32_t)slot * RECORD_SIZE;
@@ -175,6 +188,7 @@ bool settings_save(const settings_t *s) {
     }
 
     HAL_FLASH_Lock();
+    HAL_ICACHE_Invalidate();
     return true;
 }
 
@@ -253,5 +267,6 @@ bool settings_save_strings(const char *manufacturer, const char *product, const 
     }
 
     HAL_FLASH_Lock();
+    HAL_ICACHE_Invalidate();
     return true;
 }
