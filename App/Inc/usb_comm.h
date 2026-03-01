@@ -22,7 +22,7 @@
 #define CMD_DELETE_PROFILE    0x05
 #define CMD_SET_ACTIVE        0x06
 #define CMD_SAVE_TO_FLASH     0x07
-#define CMD_ENTER_DFU         0x08
+#define CMD_ENTER_DFU         0x90
 
 // Response status codes
 #define STATUS_OK             0x00
@@ -31,7 +31,7 @@
 #define STATUS_ERR_FLASH          0x03
 
 // Firmware version
-#define FW_VERSION_MAJOR  2
+#define FW_VERSION_MAJOR  1
 #define FW_VERSION_MINOR  0
 #define FW_VERSION_PATCH  0
 
