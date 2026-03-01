@@ -136,6 +136,28 @@ static void disable_amplifier(void) {
   HAL_GPIO_WritePin(AMP_EN_GPIO_Port, AMP_EN_Pin, GPIO_PIN_RESET);
 }
 
+uint8_t audio_output_get_dac(void) {
+  return HAL_GPIO_ReadPin(DAC_MUTE_GPIO_Port, DAC_MUTE_Pin) == GPIO_PIN_SET ? 1 : 0;
+}
+
+uint8_t audio_output_get_amp(void) {
+  return HAL_GPIO_ReadPin(AMP_EN_GPIO_Port, AMP_EN_Pin) == GPIO_PIN_SET ? 1 : 0;
+}
+
+void audio_output_set_dac(uint8_t enable) {
+  if (enable)
+    unmute_dac();
+  else
+    mute_dac();
+}
+
+void audio_output_set_amp(uint8_t enable) {
+  if (enable)
+    enable_amplifier();
+  else
+    disable_amplifier();
+}
+
 //--------------------------------------------------------------------+
 // Helper Functions
 //--------------------------------------------------------------------+

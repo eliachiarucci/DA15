@@ -116,6 +116,66 @@ Takes effect immediately — the device switches EQ processing to the selected p
 
 Erases the profile flash sector and writes all current profiles from RAM. Returns `ERR_FLASH` if the operation fails.
 
+### 0x80 — GET_MANUFACTURER
+
+**Request payload:** (none, LEN=0)
+
+**Response payload (variable):** Current manufacturer string as raw ASCII (no null terminator).
+
+### 0x81 — GET_PRODUCT
+
+**Request payload:** (none, LEN=0)
+
+**Response payload (variable):** Current product string as raw ASCII (no null terminator).
+
+### 0x85 — SET_MANUFACTURER
+
+**Request payload (1–32 bytes):** Raw ASCII string (no null terminator required).
+
+Overrides the USB manufacturer string descriptor at runtime. Takes effect on the next descriptor request from the host (requires re-enumeration to be visible to the OS). Returns `ERR_INVALID_PARAM` if the payload is empty or longer than 32 bytes.
+
+### 0x86 — SET_PRODUCT
+
+**Request payload (1–32 bytes):** Raw ASCII string (no null terminator required).
+
+Overrides the USB product string descriptor at runtime. Same re-enumeration caveat as `SET_MANUFACTURER`. Returns `ERR_INVALID_PARAM` if the payload is empty or longer than 32 bytes.
+
+### 0x90 — ENTER_DFU
+
+**Request payload:** (none, LEN=0)
+
+Sends an OK response, then reboots the device into the STM32 system bootloader (DFU mode). The device re-enumerates as a DFU device for firmware flashing via `dfu-util`.
+
+### 0x91 — REBOOT
+
+**Request payload:** (none, LEN=0)
+
+Sends an OK response, then performs a clean system reset via `NVIC_SystemReset()`. The device re-enumerates normally.
+
+### 0x92 — GET_DAC
+
+**Request payload:** (none, LEN=0)
+
+**Response payload (1 byte):** `0x00` = DAC muted (off), `0x01` = DAC unmuted (on).
+
+### 0x93 — GET_AMP
+
+**Request payload:** (none, LEN=0)
+
+**Response payload (1 byte):** `0x00` = amplifier disabled (off), `0x01` = amplifier enabled (on).
+
+### 0x94 — SET_DAC
+
+**Request payload (1 byte):** `[enable:1]` — `0x00` = off (mute DAC), `0x01` = on (unmute DAC).
+
+Directly controls the DAC mute GPIO. Returns `ERR_INVALID_PARAM` if the value is not 0 or 1.
+
+### 0x95 — SET_AMP
+
+**Request payload (1 byte):** `[enable:1]` — `0x00` = off (disable amplifier), `0x01` = on (enable amplifier).
+
+Directly controls the amplifier enable GPIO. Returns `ERR_INVALID_PARAM` if the value is not 0 or 1.
+
 ## Data Structures (Binary Layout)
 
 ### eq_filter_t — 36 bytes

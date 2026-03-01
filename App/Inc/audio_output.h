@@ -36,4 +36,10 @@ uint8_t audio_output_get_local_volume(void);
 void audio_output_toggle_local_mute(void);
 uint8_t audio_output_is_local_muted(void);
 
+// Direct hardware control (0 = off, 1 = on)
+uint8_t audio_output_get_dac(void);
+uint8_t audio_output_get_amp(void);
+void audio_output_set_dac(uint8_t enable);
+void audio_output_set_amp(uint8_t enable);
+
 #endif // AUDIO_OUTPUT_H

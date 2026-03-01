@@ -7,6 +7,7 @@
 
 #include "tusb.h"
 #include "usb_descriptors.h"
+#include <string.h>
 
 //--------------------------------------------------------------------+
 // Device Descriptors
@@ -161,15 +162,19 @@ enum {
     STRID_CDC,
 };
 
+// Mutable buffers for runtime-configurable strings
+static char usb_manufacturer_str[USB_STRING_MAX_LEN + 1] = "Elia Chiarucci";
+static char usb_product_str[USB_STRING_MAX_LEN + 1]      = "DA15";
+
 // Array of pointer to string descriptors
 static char const* string_desc_arr[] = {
     (const char[]) { 0x09, 0x04 },  // 0: Supported language is English (0x0409)
-    "Elia Chiarucci",               // 1: Manufacturer
-    "DA15",                         // 2: Product
+    usb_manufacturer_str,            // 1: Manufacturer
+    usb_product_str,                 // 2: Product
     "000000000001",                 // 3: Serial number
     "DA15",                         // 4: Audio Interface
     "DFU Runtime",                  // 5: DFU Runtime Interface
-    "DA15 EQ Config",               // 6: CDC Interface
+    "DA15 Config",               // 6: CDC Interface
 };
 
 static uint16_t _desc_str[32 + 1];
@@ -210,4 +215,25 @@ uint16_t const* tud_descriptor_string_cb(uint8_t index, uint16_t langid) {
     _desc_str[0] = (uint16_t) ((TUSB_DESC_STRING << 8) | (2 * chr_count + 2));
 
     return _desc_str;
+}
+
+//--------------------------------------------------------------------+
+// Runtime String Getters / Setters
+//--------------------------------------------------------------------+
+const char *usb_desc_get_manufacturer(void) {
+    return usb_manufacturer_str;
+}
+
+const char *usb_desc_get_product(void) {
+    return usb_product_str;
+}
+
+void usb_desc_set_manufacturer(const char *str) {
+    strncpy(usb_manufacturer_str, str, USB_STRING_MAX_LEN);
+    usb_manufacturer_str[USB_STRING_MAX_LEN] = '\0';
+}
+
+void usb_desc_set_product(const char *str) {
+    strncpy(usb_product_str, str, USB_STRING_MAX_LEN);
+    usb_product_str[USB_STRING_MAX_LEN] = '\0';
 }

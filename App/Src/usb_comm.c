@@ -10,7 +10,10 @@
 
 #include "usb_comm.h"
 #include "app.h"
+#include "audio_output.h"
 #include "eq_profile.h"
+#include "usb_descriptors.h"
+#include "stm32h5xx_hal.h"
 #include "tusb.h"
 #include <string.h>
 
@@ -186,10 +189,81 @@ static void handle_set_active(void) {
     send_ok(CMD_SET_ACTIVE, NULL, 0);
 }
 
+static void handle_get_manufacturer(void) {
+    const char *str = usb_desc_get_manufacturer();
+    send_ok(CMD_GET_MANUFACTURER, (const uint8_t *)str, (uint16_t)strlen(str));
+}
+
+static void handle_get_product(void) {
+    const char *str = usb_desc_get_product();
+    send_ok(CMD_GET_PRODUCT, (const uint8_t *)str, (uint16_t)strlen(str));
+}
+
+static void handle_set_manufacturer(void) {
+    if (rx_len == 0 || rx_len > USB_STRING_MAX_LEN) {
+        send_error(CMD_SET_MANUFACTURER, STATUS_ERR_INVALID_PARAM);
+        return;
+    }
+    char str[USB_STRING_MAX_LEN + 1];
+    memcpy(str, rx_buf, rx_len);
+    str[rx_len] = '\0';
+    usb_desc_set_manufacturer(str);
+    send_ok(CMD_SET_MANUFACTURER, NULL, 0);
+}
+
+static void handle_set_product(void) {
+    if (rx_len == 0 || rx_len > USB_STRING_MAX_LEN) {
+        send_error(CMD_SET_PRODUCT, STATUS_ERR_INVALID_PARAM);
+        return;
+    }
+    char str[USB_STRING_MAX_LEN + 1];
+    memcpy(str, rx_buf, rx_len);
+    str[rx_len] = '\0';
+    usb_desc_set_product(str);
+    send_ok(CMD_SET_PRODUCT, NULL, 0);
+}
+
 static void handle_enter_dfu(void) {
     send_ok(CMD_ENTER_DFU, NULL, 0);
     tud_cdc_write_flush();
     app_reboot_to_dfu();
+}
+
+static void handle_get_dac(void) {
+    uint8_t state = audio_output_get_dac();
+    send_ok(CMD_GET_DAC, &state, 1);
+}
+
+static void handle_get_amp(void) {
+    uint8_t state = audio_output_get_amp();
+    send_ok(CMD_GET_AMP, &state, 1);
+}
+
+static void handle_set_dac(void) {
+    if (rx_len < 1 || rx_buf[0] > 1) {
+        send_error(CMD_SET_DAC, STATUS_ERR_INVALID_PARAM);
+        return;
+    }
+    audio_output_set_dac(rx_buf[0]);
+    send_ok(CMD_SET_DAC, NULL, 0);
+}
+
+static void handle_set_amp(void) {
+    if (rx_len < 1 || rx_buf[0] > 1) {
+        send_error(CMD_SET_AMP, STATUS_ERR_INVALID_PARAM);
+        return;
+    }
+    audio_output_set_amp(rx_buf[0]);
+    send_ok(CMD_SET_AMP, NULL, 0);
+}
+
+static void handle_reboot(void) {
+    send_ok(CMD_REBOOT, NULL, 0);
+    tud_cdc_write_flush();
+    uint32_t deadline = HAL_GetTick() + 20;
+    while (HAL_GetTick() < deadline)
+        tud_task();
+    NVIC_SystemReset();
 }
 
 static void handle_save_to_flash(void) {
@@ -214,7 +288,16 @@ static void dispatch_command(void) {
     case CMD_DELETE_PROFILE:    handle_delete_profile();    break;
     case CMD_SET_ACTIVE:        handle_set_active();       break;
     case CMD_SAVE_TO_FLASH:     handle_save_to_flash();    break;
+    case CMD_GET_MANUFACTURER:  handle_get_manufacturer(); break;
+    case CMD_GET_PRODUCT:       handle_get_product();      break;
+    case CMD_SET_MANUFACTURER:  handle_set_manufacturer(); break;
+    case CMD_SET_PRODUCT:       handle_set_product();      break;
+    case CMD_GET_DAC:           handle_get_dac();          break;
+    case CMD_GET_AMP:           handle_get_amp();          break;
+    case CMD_SET_DAC:           handle_set_dac();          break;
+    case CMD_SET_AMP:           handle_set_amp();          break;
     case CMD_ENTER_DFU:         handle_enter_dfu();        break;
+    case CMD_REBOOT:            handle_reboot();           break;
     default:
         send_error(rx_cmd, STATUS_ERR_INVALID_CMD);
         break;

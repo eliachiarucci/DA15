@@ -11,6 +11,16 @@
 #include "tusb.h"
 
 //--------------------------------------------------------------------+
+// Runtime String Updates
+//--------------------------------------------------------------------+
+#define USB_STRING_MAX_LEN  32
+
+const char *usb_desc_get_manufacturer(void);
+const char *usb_desc_get_product(void);
+void usb_desc_set_manufacturer(const char *str);
+void usb_desc_set_product(const char *str);
+
+//--------------------------------------------------------------------+
 // Interface Numbers
 //--------------------------------------------------------------------+
 enum {
