@@ -1,4 +1,4 @@
-# DA15 USB CDC Protocol — Electron App Integration Guide
+# DA15 USB CDC Protocol — External App Integration Guide
 
 ## Connection
 
@@ -15,7 +15,7 @@ No baud rate configuration is needed (it's USB CDC, not a real UART), but most s
 
 ## Binary Frame Protocol
 
-All communication is request/response. The host (Electron app) sends a request, the device always replies.
+All communication is request/response. The host (app) sends a request, the device always replies.
 
 ### Request frame
 ```
@@ -128,6 +128,12 @@ Erases the profile flash sector and writes all current profiles from RAM. Return
 
 **Response payload (variable):** Current product string as raw ASCII (no null terminator).
 
+### 0x82 — GET_AUDIO_ITF
+
+**Request payload:** (none, LEN=0)
+
+**Response payload (variable):** Current audio interface string as raw ASCII (no null terminator).
+
 ### 0x85 — SET_MANUFACTURER
 
 **Request payload (1–32 bytes):** Raw ASCII string (no null terminator required).
@@ -139,6 +145,12 @@ Overrides the USB manufacturer string descriptor at runtime. Takes effect on the
 **Request payload (1–32 bytes):** Raw ASCII string (no null terminator required).
 
 Overrides the USB product string descriptor at runtime. Same re-enumeration caveat as `SET_MANUFACTURER`. Returns `ERR_INVALID_PARAM` if the payload is empty or longer than 32 bytes.
+
+### 0x87 — SET_AUDIO_ITF
+
+**Request payload (1–32 bytes):** Raw ASCII string (no null terminator required).
+
+Overrides the USB audio interface string descriptor at runtime. Same re-enumeration caveat as `SET_MANUFACTURER`. The new value is persisted to flash alongside the manufacturer and product strings. Returns `ERR_INVALID_PARAM` if the payload is empty or longer than 32 bytes.
 
 ### 0x90 — ENTER_DFU
 
@@ -219,7 +231,7 @@ Filters beyond `filter_count` are ignored by the device but should be zeroed.
 
 ## Biquad Coefficient Computation
 
-The Electron app must pre-compute biquad coefficients. The device uses **Direct Form II Transposed** processing:
+The values must pre-compute biquad coefficients. The device uses **Direct Form II Transposed** processing:
 
 ```
 y[n] = b0*x[n] + s1

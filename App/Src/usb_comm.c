@@ -12,6 +12,7 @@
 #include "app.h"
 #include "audio_output.h"
 #include "eq_profile.h"
+#include "settings.h"
 #include "usb_descriptors.h"
 #include "stm32h5xx_hal.h"
 #include "tusb.h"
@@ -208,6 +209,7 @@ static void handle_set_manufacturer(void) {
     memcpy(str, rx_buf, rx_len);
     str[rx_len] = '\0';
     usb_desc_set_manufacturer(str);
+    settings_save_strings(usb_desc_get_manufacturer(), usb_desc_get_product(), usb_desc_get_audio_itf());
     send_ok(CMD_SET_MANUFACTURER, NULL, 0);
 }
 
@@ -220,7 +222,26 @@ static void handle_set_product(void) {
     memcpy(str, rx_buf, rx_len);
     str[rx_len] = '\0';
     usb_desc_set_product(str);
+    settings_save_strings(usb_desc_get_manufacturer(), usb_desc_get_product(), usb_desc_get_audio_itf());
     send_ok(CMD_SET_PRODUCT, NULL, 0);
+}
+
+static void handle_get_audio_itf(void) {
+    const char *str = usb_desc_get_audio_itf();
+    send_ok(CMD_GET_AUDIO_ITF, (const uint8_t *)str, (uint16_t)strlen(str));
+}
+
+static void handle_set_audio_itf(void) {
+    if (rx_len == 0 || rx_len > USB_STRING_MAX_LEN) {
+        send_error(CMD_SET_AUDIO_ITF, STATUS_ERR_INVALID_PARAM);
+        return;
+    }
+    char str[USB_STRING_MAX_LEN + 1];
+    memcpy(str, rx_buf, rx_len);
+    str[rx_len] = '\0';
+    usb_desc_set_audio_itf(str);
+    settings_save_strings(usb_desc_get_manufacturer(), usb_desc_get_product(), usb_desc_get_audio_itf());
+    send_ok(CMD_SET_AUDIO_ITF, NULL, 0);
 }
 
 static void handle_enter_dfu(void) {
@@ -290,8 +311,10 @@ static void dispatch_command(void) {
     case CMD_SAVE_TO_FLASH:     handle_save_to_flash();    break;
     case CMD_GET_MANUFACTURER:  handle_get_manufacturer(); break;
     case CMD_GET_PRODUCT:       handle_get_product();      break;
+    case CMD_GET_AUDIO_ITF:     handle_get_audio_itf();    break;
     case CMD_SET_MANUFACTURER:  handle_set_manufacturer(); break;
     case CMD_SET_PRODUCT:       handle_set_product();      break;
+    case CMD_SET_AUDIO_ITF:     handle_set_audio_itf();    break;
     case CMD_GET_DAC:           handle_get_dac();          break;
     case CMD_GET_AMP:           handle_get_amp();          break;
     case CMD_SET_DAC:           handle_set_dac();          break;

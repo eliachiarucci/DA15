@@ -24,8 +24,10 @@
 #define CMD_SAVE_TO_FLASH     0x07
 #define CMD_GET_MANUFACTURER  0x80
 #define CMD_GET_PRODUCT       0x81
+#define CMD_GET_AUDIO_ITF     0x82
 #define CMD_SET_MANUFACTURER  0x85
 #define CMD_SET_PRODUCT       0x86
+#define CMD_SET_AUDIO_ITF     0x87
 #define CMD_ENTER_DFU         0x90
 #define CMD_REBOOT            0x91
 #define CMD_GET_DAC           0x92

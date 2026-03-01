@@ -15,6 +15,7 @@
 #include "eq_profile.h"
 #include "main.h"
 #include "settings.h"
+#include "usb_descriptors.h"
 #include "sh1106.h"
 #include "stm32h5xx_hal.h"
 #include "tusb.h"
@@ -329,6 +330,15 @@ void app_init(void) {
     eq_profile_set_active(saved.active_profile);
   } else {
     SEGGER_RTT_printf(0, "[init] no valid settings, using defaults\n");
+  }
+
+  // Load persisted USB string descriptors
+  char mfr[33], prod[33], audio_itf[33];
+  if (settings_load_strings(mfr, prod, audio_itf)) {
+    usb_desc_set_manufacturer(mfr);
+    usb_desc_set_product(prod);
+    usb_desc_set_audio_itf(audio_itf);
+    SEGGER_RTT_printf(0, "[init] USB strings loaded: '%s' / '%s' / '%s'\n", mfr, prod, audio_itf);
   }
 
   // Initialize display module (applies brightness, starts activity timer)

@@ -17,8 +17,10 @@
 
 const char *usb_desc_get_manufacturer(void);
 const char *usb_desc_get_product(void);
+const char *usb_desc_get_audio_itf(void);
 void usb_desc_set_manufacturer(const char *str);
 void usb_desc_set_product(const char *str);
+void usb_desc_set_audio_itf(const char *str);
 
 //--------------------------------------------------------------------+
 // Interface Numbers

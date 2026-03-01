@@ -29,4 +29,11 @@ bool settings_load(settings_t *out);
 // Save settings to flash. Returns false on flash error.
 bool settings_save(const settings_t *s);
 
+// Load USB string descriptors from flash. Returns false if not found.
+// Buffers must be at least 33 bytes each.
+bool settings_load_strings(char manufacturer[33], char product[33], char audio_itf[33]);
+
+// Save USB string descriptors to flash. Returns false on flash error.
+bool settings_save_strings(const char *manufacturer, const char *product, const char *audio_itf);
+
 #endif // SETTINGS_H

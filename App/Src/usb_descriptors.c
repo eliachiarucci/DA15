@@ -165,6 +165,7 @@ enum {
 // Mutable buffers for runtime-configurable strings
 static char usb_manufacturer_str[USB_STRING_MAX_LEN + 1] = "Elia Chiarucci";
 static char usb_product_str[USB_STRING_MAX_LEN + 1]      = "DA15";
+static char usb_audio_itf_str[USB_STRING_MAX_LEN + 1]    = "DA15";
 
 // Array of pointer to string descriptors
 static char const* string_desc_arr[] = {
@@ -172,7 +173,7 @@ static char const* string_desc_arr[] = {
     usb_manufacturer_str,            // 1: Manufacturer
     usb_product_str,                 // 2: Product
     "000000000001",                 // 3: Serial number
-    "DA15",                         // 4: Audio Interface
+    usb_audio_itf_str,               // 4: Audio Interface
     "DFU Runtime",                  // 5: DFU Runtime Interface
     "DA15 Config",               // 6: CDC Interface
 };
@@ -228,6 +229,10 @@ const char *usb_desc_get_product(void) {
     return usb_product_str;
 }
 
+const char *usb_desc_get_audio_itf(void) {
+    return usb_audio_itf_str;
+}
+
 void usb_desc_set_manufacturer(const char *str) {
     strncpy(usb_manufacturer_str, str, USB_STRING_MAX_LEN);
     usb_manufacturer_str[USB_STRING_MAX_LEN] = '\0';
@@ -236,4 +241,9 @@ void usb_desc_set_manufacturer(const char *str) {
 void usb_desc_set_product(const char *str) {
     strncpy(usb_product_str, str, USB_STRING_MAX_LEN);
     usb_product_str[USB_STRING_MAX_LEN] = '\0';
+}
+
+void usb_desc_set_audio_itf(const char *str) {
+    strncpy(usb_audio_itf_str, str, USB_STRING_MAX_LEN);
+    usb_audio_itf_str[USB_STRING_MAX_LEN] = '\0';
 }
