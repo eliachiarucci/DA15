@@ -33,6 +33,11 @@ enum {
 #define EPNUM_CDC_IN          0x83  // CDC data (IN)
 
 //--------------------------------------------------------------------+
+// MS OS 2.0 Vendor Request Code
+//--------------------------------------------------------------------+
+#define VENDOR_REQUEST_MICROSOFT  0x01
+
+//--------------------------------------------------------------------+
 // UAC1 Entity IDs (used in TUD_AUDIO10_SPEAKER_STEREO_FB_DESCRIPTOR)
 //--------------------------------------------------------------------+
 #define UAC1_ENTITY_INPUT_TERMINAL      0x01
