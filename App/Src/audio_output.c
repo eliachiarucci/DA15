@@ -191,10 +191,10 @@ static void fill_with_hold(uint16_t *buffer, uint16_t frame_count) {
 }
 
 // Power-based pre-scaling factors (0-256 scale)
-// 0 = 500mA:  -6dB = 10^(-6/20) = 0.501 = 128/256
-// 1 = 1500mA: -4dB = 10^(-4/20) = 0.631 = 161/256
-// 2 = 3000mA: -2dB = 10^(-2/20) = 0.794 = 203/256
-static const uint16_t power_scale_table[3] = {128, 161, 203};
+// 0 = 500mA:  -4dB = 10^(-4/20) = 0.631 = 161/256
+// 1 = 1500mA: -2dB = 10^(-2/20) = 0.794 = 203/256
+// 2 = 3000mA:  0dB = 1.0         = 256/256
+static const uint16_t power_scale_table[3] = {161, 203, 256};
 
 // Get volume scale for audio processing (0-256, 256 = unity)
 // Combines: USB host volume × power pre-scaling × local pre-attenuation
@@ -209,12 +209,17 @@ static uint16_t get_volume_scale(void) {
     vol_db = 0;
 
   uint16_t vol_scale = volume_table[vol_db + 90];
+
+#if NO_POWER_SCALING
+  uint16_t scale = vol_scale;
+#else
   uint8_t power_level = app_get_power_level();
   if (power_level > 2)
     power_level = 2;
 
   // Apply power-based pre-scaling: (vol_scale * power_scale) / 256
   uint16_t scale = (vol_scale * power_scale_table[power_level]) >> 8;
+#endif
 
   // Apply local pre-attenuation: quadratic curve for perceptually linear feel
   // vol²/10000 * 256: vol=50→64(25%), vol=75→144(56%), vol=100→256(100%)

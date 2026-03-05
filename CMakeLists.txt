@@ -99,10 +99,14 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     "${TINYUSB_PATH}/src"
 )
 
+# Board options
+option(NO_POWER_SCALING "Disable USB-C CC power detection (headphone board)" OFF)
+
 # Add project symbols (macros)
 target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
     # TinyUSB config location
     CFG_TUSB_MCU=OPT_MCU_STM32H5
+    $<$<BOOL:${NO_POWER_SCALING}>:NO_POWER_SCALING=1>
 )
 
 # Remove wrong libob.a library dependency when using cpp files

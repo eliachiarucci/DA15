@@ -16,6 +16,7 @@
 #include "eq_profile.h"
 #include "SEGGER_RTT.h"
 #include "stm32h5xx_hal.h"
+#include <math.h>
 #include <string.h>
 
 // ---------------------------------------------------------------------------
@@ -57,6 +58,26 @@ typedef struct {
 } biquad_state_t;
 
 static biquad_state_t filter_state[EQ_MAX_FILTERS][2]; // [filter][channel]
+
+// Cached pre-attenuation for the active profile
+static float profile_preatt = 1.0f;
+
+// Compute pre-attenuation from the sum of positive filter gains
+// Conservative: assumes all boosting filters could overlap at one frequency
+static float compute_profile_preatt(const eq_profile_t *prof) {
+    float sum_db = 0.0f;
+    for (uint8_t f = 0; f < prof->filter_count; f++) {
+        const eq_filter_t *filt = &prof->filters[f];
+        if (filt->enabled && filt->type != FILTER_OFF && filt->gain > 0.0f)
+            sum_db += filt->gain;
+    }
+    if (sum_db <= 0.0f)
+        return 1.0f;
+    // 10^(-sum_db/20): exact, only computed on profile change
+    float lin = powf(10.0f, -sum_db * 0.05f);
+    if (lin < 0.01f) lin = 0.01f; // Floor at -40dB
+    return lin;
+}
 
 // ---------------------------------------------------------------------------
 // Non-blocking flash write state machine
@@ -161,6 +182,10 @@ bool eq_profile_set(uint8_t id, const eq_profile_t *p) {
     // Clamp filter count
     if (store.profiles[id].filter_count > EQ_MAX_FILTERS)
         store.profiles[id].filter_count = EQ_MAX_FILTERS;
+
+    // Recalculate pre-attenuation if this is the active profile
+    if (id == active_profile)
+        profile_preatt = compute_profile_preatt(&store.profiles[id]);
 
     // Recount
     store.profile_count = 0;
@@ -287,6 +312,11 @@ void eq_profile_set_active(uint8_t id) {
         return;
 
     active_profile = id;
+
+    if (id != EQ_PROFILE_OFF)
+        profile_preatt = compute_profile_preatt(&store.profiles[id]);
+    else
+        profile_preatt = 1.0f;
 }
 
 uint8_t eq_profile_get_active(void) {
@@ -310,9 +340,6 @@ void eq_profile_reset_state(void) {
     memset(filter_state, 0, sizeof(filter_state));
 }
 
-// Pre-attenuation to match the legacy EQ headroom (-5dB ≈ 0.562)
-#define PRE_ATTENUATION 0.5623413f
-
 // 24-bit range limits
 #define SAMPLE_MAX  8388607.0f
 #define SAMPLE_MIN -8388608.0f
@@ -328,7 +355,7 @@ void eq_profile_process(int32_t *buffer, uint16_t sample_count,
         return;
 
     const float vol = (float)volume_scale * (1.0f / 256.0f);
-    const float pre_vol = PRE_ATTENUATION * vol;
+    const float pre_vol = profile_preatt * vol;
 
     // Process stereo pairs
     for (uint16_t i = 0; i < sample_count; i += 2) {

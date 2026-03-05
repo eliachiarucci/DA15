@@ -23,6 +23,15 @@
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release"
             }
+        },
+        {
+            "name": "Release-HP",
+            "inherits": "default",
+            "binaryDir": "${sourceDir}/build/Release-HP",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "NO_POWER_SCALING": "ON"
+            }
         }
     ],
     "buildPresets": [
@@ -33,6 +42,10 @@
         {
             "name": "Release",
             "configurePreset": "Release"
+        },
+        {
+            "name": "Release-HP",
+            "configurePreset": "Release-HP"
         }
     ]
 }
