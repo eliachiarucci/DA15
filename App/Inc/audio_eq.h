@@ -41,7 +41,7 @@ bool audio_eq_is_enabled(void);
 
 // Process audio buffer through EQ (in-place, stereo interleaved)
 // Buffer contains 24-bit signed values in int32_t
-// volume_scale: 0-256 (256 = unity gain, 0 = mute)
-void audio_eq_process(int32_t* buffer, uint16_t sample_count, uint16_t volume_scale);
+// volume_scale: 0-65536 (65536 = unity gain, 0 = mute)
+void audio_eq_process(int32_t* buffer, uint16_t sample_count, uint32_t volume_scale);
 
 #endif /* AUDIO_EQ_H_ */

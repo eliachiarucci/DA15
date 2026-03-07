@@ -346,7 +346,7 @@ void eq_profile_reset_state(void) {
 #define SAMPLE_SCALE 8388608.0f
 
 void eq_profile_process(int32_t *buffer, uint16_t sample_count,
-                        uint16_t volume_scale) {
+                        uint32_t volume_scale) {
     if (active_profile == EQ_PROFILE_OFF || active_profile >= EQ_MAX_PROFILES)
         return;
 
@@ -354,7 +354,7 @@ void eq_profile_process(int32_t *buffer, uint16_t sample_count,
     if (is_profile_empty(prof))
         return;
 
-    const float vol = (float)volume_scale * (1.0f / 256.0f);
+    const float vol = (float)volume_scale * (1.0f / 65536.0f);
     const float pre_vol = profile_preatt * vol;
 
     // Process stereo pairs

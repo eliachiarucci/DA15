@@ -52,7 +52,7 @@
             "servertype": "openocd",
             "cwd": "${workspaceFolder}",
             "preLaunchTask": "Build",
-            "executable": "${workspaceFolder}/build/Release-HP/DA15.elf",
+            "executable": "${workspaceFolder}/build/Release-HA1/DA15.elf",
             "device": "STM32H503CB",
             "configFiles": [
                 "interface/stlink-dap.cfg",

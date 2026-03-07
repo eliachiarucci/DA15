@@ -162,12 +162,11 @@ bool audio_eq_is_enabled(void) {
     return eq_enabled;
 }
 
-void audio_eq_process(int32_t *buffer, uint16_t sample_count, uint16_t volume_scale) {
+void audio_eq_process(int32_t *buffer, uint16_t sample_count, uint32_t volume_scale) {
     // If EQ disabled or all bands at 0, apply volume only (no pre-attenuation)
     if (!eq_enabled || (bass_level == 0 && treble_level == 0)) {
         for (uint16_t i = 0; i < sample_count; i++) {
-            int32_t sample = (buffer[i] * volume_scale) >> 8;
-            buffer[i] = sample;
+            buffer[i] = (int32_t)(((int64_t)buffer[i] * volume_scale) >> 16);
         }
         return;
     }
@@ -253,10 +252,10 @@ void audio_eq_process(int32_t *buffer, uint16_t sample_count, uint16_t volume_sc
         if (out_r > AUDIO_24BIT_MAX) out_r = AUDIO_24BIT_MAX;
         else if (out_r < AUDIO_24BIT_MIN) out_r = AUDIO_24BIT_MIN;
 
-        // Apply volume (24-bit * 8-bit = fits int32_t after clamp above)
-        if (volume_scale < 256) {
-            out_l = (out_l * volume_scale) >> 8;
-            out_r = (out_r * volume_scale) >> 8;
+        // Apply volume (24-bit * 16-bit via int64_t, single-cycle smull on M33)
+        if (volume_scale < 65536) {
+            out_l = (int32_t)(((int64_t)out_l * volume_scale) >> 16);
+            out_r = (int32_t)(((int64_t)out_r * volume_scale) >> 16);
         }
 
         buffer[i] = out_l;

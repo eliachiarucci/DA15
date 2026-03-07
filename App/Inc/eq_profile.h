@@ -124,9 +124,9 @@ const char *eq_profile_get_active_name(void);
 // Same signature as audio_eq_process() for easy swapping.
 // buffer: stereo interleaved int32_t (24-bit signed values)
 // sample_count: total mono samples (frames * 2)
-// volume_scale: 0-256 (256 = unity)
+// volume_scale: 0-65536 (65536 = unity)
 void eq_profile_process(int32_t *buffer, uint16_t sample_count,
-                        uint16_t volume_scale);
+                        uint32_t volume_scale);
 
 // Clear biquad filter state (call on stream start to avoid transients).
 void eq_profile_reset_state(void);
