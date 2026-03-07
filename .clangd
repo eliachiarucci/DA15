@@ -2,7 +2,7 @@ CompileFlags:
   Add:
     - '-ferror-limit=0'
     - '-Wno-implicit-int'
-  CompilationDatabase: build/Release-HP
+  CompilationDatabase: build/Release-HA1
 Diagnostics:
   Suppress:
     - unused-includes

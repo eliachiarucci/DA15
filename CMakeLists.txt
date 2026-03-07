@@ -101,12 +101,14 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
 
 # Board options
 option(NO_POWER_SCALING "Disable USB-C CC power detection (headphone board)" OFF)
+option(NO_SWAP_CHANNELS "Disable L/R channel swapping" OFF)
 
 # Add project symbols (macros)
 target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
     # TinyUSB config location
     CFG_TUSB_MCU=OPT_MCU_STM32H5
     $<$<BOOL:${NO_POWER_SCALING}>:NO_POWER_SCALING=1>
+    $<$<BOOL:${NO_SWAP_CHANNELS}>:NO_SWAP_CHANNELS=1>
 )
 
 # Remove wrong libob.a library dependency when using cpp files

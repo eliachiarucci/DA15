@@ -23,8 +23,12 @@
 // Debug: set to 1 to enable RTT logging
 #define AUDIO_DEBUG 1
 
-// Swap L/R channels: set to 1 to swap stereo channels
+// Swap L/R channels (disabled for HA1 board via NO_SWAP_CHANNELS)
+#ifndef NO_SWAP_CHANNELS
 #define SWAP_CHANNELS 1
+#else
+#define SWAP_CHANNELS 0
+#endif
 
 // External I2S handle from main.c
 extern I2S_HandleTypeDef hi2s1;
