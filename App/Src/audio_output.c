@@ -287,8 +287,7 @@ static uint16_t read_audio_data(uint16_t *i2s_dest,
   else
     audio_eq_process(proc, sample_count, get_volume_scale());
 
-  // Save last samples before packing (pack overwrites the int32_t data
-  // in-place)
+  // Save last samples before packing (pack overwrites in-place)
   if (sample_count >= 2) {
     last_sample_left = proc[sample_count - 2] ? proc[sample_count - 2] : SILENCE_DC_OFFSET;
     last_sample_right = proc[sample_count - 1] ? proc[sample_count - 1] : SILENCE_DC_OFFSET;
@@ -329,14 +328,14 @@ void audio_output_init(void) {
   mute_dac();
   disable_amplifier();
 
-  // Start I2S DMA with silence so DAC has a defined zero output
+  // Start I2S DMA with DC-offset silence
   SEGGER_RTT_printf(0, "[audio] I2S DMA start (buf=%p, size=%d)...\n",
                     i2s_buffer, I2S_DMA_SIZE);
   HAL_StatusTypeDef rc = HAL_I2S_Transmit_DMA(&hi2s1, i2s_buffer, I2S_DMA_SIZE);
   SEGGER_RTT_printf(0, "[audio] I2S DMA result: %d\n", rc);
   dma_running = 1;
 
-  // Unmute DAC — now outputting clean silence via I2S
+  // Unmute DAC — now outputting DC-offset silence via I2S
   unmute_dac();
   SEGGER_RTT_printf(0, "[audio] DAC unmuted, waiting 500ms...\n");
 
@@ -360,7 +359,7 @@ void audio_output_start_streaming(void) {
   last_sample_left = SILENCE_DC_OFFSET;
   last_sample_right = SILENCE_DC_OFFSET;
 
-  // Clear flags so we don't service stale callbacks from idle period
+  // Clear stale callback flags from idle period
   first_half_needs_fill = 0;
   second_half_needs_fill = 0;
 }
@@ -372,7 +371,6 @@ void audio_output_stop_streaming(void) {
   last_sample_left = SILENCE_DC_OFFSET;
   last_sample_right = SILENCE_DC_OFFSET;
 
-  // Clear flags — the non-streaming silence fill will pick up fresh ones
   first_half_needs_fill = 0;
   second_half_needs_fill = 0;
 }
