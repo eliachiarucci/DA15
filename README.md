@@ -21,6 +21,7 @@ For more pictures, see [Hardware/Images](Hardware/Images/).
 - **OLED UI** - SH1106 128x64 display with rotary encoder navigation.
 - **DFU firmware update** - update over USB.
 - **Persistent user settings** - stored in flash with wear leveling.
+- **Low power consumption** - 0.5W in standby.
 
 ## Building
 
