@@ -14,7 +14,7 @@ For more pictures, see [Hardware/Images](Hardware/Images/).
 
 ## Features
 
-- **Power** - Max 4.4W into 4Ω and 2.2W into 8Ω speakers (THD 0.035%).
+- **Power** - 2 x 4.4W into 4Ω and 2 x 2.2W into 8Ω speakers (@ 0.035% THD). Can be set at max volume without losing quality.
 - **USB Audio Class 1** - 24-bit/48kHz stereo with dedicated 24.576mhz audio crystal.
 - **EQ** - Basic 2 bass and treble EQ or advanced EQ profiles via the [EQOS app](https://github.com/eliachiarucci/EQOS).
 - **USB-C power detection** - adapts output level based on CC line voltage (500mA / 1.5A / 3A).
