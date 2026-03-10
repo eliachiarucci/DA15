@@ -26,8 +26,9 @@
 #include "stm32h5xx_hal.h"
 
 // Most encoders with detents: 1 detent = 1 full quadrature cycle = 4 edges
-// Change to 2 if your encoder detents at half-cycles
-#define COUNTS_PER_DETENT 4
+// Use 4 for full-cycle detent encoders
+#define COUNTS_PER_DETENT 2
+#define ENCODER_DIRECTION 1  // 1 = normal, -1 = reversed
 
 #define BTN_DEBOUNCE_MS 50
 #define LONG_PRESS_MS   1000
@@ -82,7 +83,7 @@ void encoder_exti_callback(uint16_t GPIO_Pin) {
 
         // Look up transition in state table
         int8_t dir = qdec_table[(prev_state << 2) | curr_state];
-        encoder_accum -= dir;  // negated to match physical CW = increase
+        encoder_accum += dir * ENCODER_DIRECTION;
         prev_state = curr_state;
     }
 }

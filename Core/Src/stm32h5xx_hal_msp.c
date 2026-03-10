@@ -307,12 +307,20 @@ void HAL_I2S_MspInit(I2S_HandleTypeDef* hi2s)
     PA1     ------> I2S1_WS
     PA2     ------> I2S1_CK
     PA4     ------> I2S1_SDO
+    PA5     ------> I2S1_MCK
     */
     GPIO_InitStruct.Pin = GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_4;
     GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
     GPIO_InitStruct.Alternate = GPIO_AF4_SPI1;
+    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+    GPIO_InitStruct.Pin = GPIO_PIN_5;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    GPIO_InitStruct.Alternate = GPIO_AF6_SPI1;
     HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
     /* I2S1 DMA Init */
@@ -399,8 +407,9 @@ void HAL_I2S_MspDeInit(I2S_HandleTypeDef* hi2s)
     PA1     ------> I2S1_WS
     PA2     ------> I2S1_CK
     PA4     ------> I2S1_SDO
+    PA5     ------> I2S1_MCK
     */
-    HAL_GPIO_DeInit(GPIOA, GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_4);
+    HAL_GPIO_DeInit(GPIOA, GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_4|GPIO_PIN_5);
 
     /* I2S1 DMA DeInit */
     HAL_DMA_DeInit(hi2s->hdmatx);
