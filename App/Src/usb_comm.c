@@ -11,6 +11,7 @@
 #include "usb_comm.h"
 #include "app.h"
 #include "audio_output.h"
+#include "display.h"
 #include "eq_profile.h"
 #include "settings.h"
 #include "usb_descriptors.h"
@@ -197,6 +198,7 @@ static void handle_set_active(void) {
     uint8_t id = rx_buf[0];
     eq_profile_set_active(id);
     app_save_settings();
+    display_set_dirty();
     send_ok(CMD_SET_ACTIVE, NULL, 0);
 }
 
