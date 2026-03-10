@@ -25,8 +25,6 @@
 #include "main.h"
 #include "stm32h5xx_hal.h"
 
-// Most encoders with detents: 1 detent = 1 full quadrature cycle = 4 edges
-// Use 4 for full-cycle detent encoders
 #define COUNTS_PER_DETENT 2
 #define ENCODER_DIRECTION 1  // 1 = normal, -1 = reversed
 
@@ -81,9 +79,17 @@ void encoder_exti_callback(uint16_t GPIO_Pin) {
         uint8_t b = HAL_GPIO_ReadPin(TRIM_B_GPIO_Port, TRIM_B_Pin);
         uint8_t curr_state = (a << 1) | b;
 
-        // Look up transition in state table
         int8_t dir = qdec_table[(prev_state << 2) | curr_state];
         encoder_accum += dir * ENCODER_DIRECTION;
+
+        // At detent rest positions (both high or both low with pull-ups),
+        // clear any fractional remainder to prevent directional bias from bounce
+        if (curr_state == 0x3 || curr_state == 0x0) {
+            int16_t accum = encoder_accum;
+            int16_t snapped = (accum / COUNTS_PER_DETENT) * COUNTS_PER_DETENT;
+            encoder_accum = snapped;
+        }
+
         prev_state = curr_state;
     }
 }
