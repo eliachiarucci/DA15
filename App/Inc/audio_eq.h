@@ -26,7 +26,7 @@
 // Initialize EQ (sets to flat/0dB)
 void audio_eq_init(void);
 
-// Set EQ band value (0 to 10 dB boost, only bass implemented)
+// Set EQ band value (-6 to +6 dB boost, bass and treble)
 void audio_eq_set_band(uint8_t band, int8_t value);
 
 // Get EQ band value

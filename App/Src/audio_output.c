@@ -21,9 +21,9 @@
 
 
 // Debug: set to 1 to enable RTT logging
-#define AUDIO_DEBUG 1
+#define AUDIO_DEBUG 0
 
-// Swap L/R channels (disabled for HA1 board via NO_SWAP_CHANNELS)
+// Swap L/R channels (Necessary for DA15)
 #ifndef NO_SWAP_CHANNELS
 #define SWAP_CHANNELS 1
 #else
