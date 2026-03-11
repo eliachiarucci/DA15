@@ -1,11 +1,18 @@
 # DA15 - USB Audio DAC + Amplifier
 
 The goal of this project was to create a minimal amplifier for desktop use, using only a single USB-C cable for both data and power.
-The amp outputs a max of 4.2Vrms, which is often enough for a good listening experience in a small room with moderately sensitive speakers. I personally keep the volume at 30% most of the time.
+The amp outputs a max of 4.2Vrms, which is often enough for a good listening experience in a small room with moderately sensitive speakers.
+I personally keep the volume at 30% most of the time.
+
+The amp is also quite portable, and can be easily powered with a phone through a USB-C cable.
+
+
+## Main components:
 
 - **MCU**: STM32H503
 - **DAC**: PCM5102A
 - **AMP**: PAM8965
+
 
 ![DA15 Front](Hardware/Images/Front.jpg)
 ![DA15 PCB Render](Hardware/Images/3D_Render.png)
