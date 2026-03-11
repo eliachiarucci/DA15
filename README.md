@@ -1,7 +1,7 @@
 # DA15 - USB Audio DAC + Amplifier
 
 The goal of this project was to create a minimal amplifier for desktop use, using only a single USB-C cable for both data and power.
-The amp outputs a max of 4.2Vrms, which is often enough for a good listening experience in a small room with moderately sensitive speakers.
+The amp outputs a max of 4.4W into 4Ω per channel, which is often enough for a good listening experience in a small room with moderately sensitive speakers.
 I personally keep the volume at 30% most of the time.
 
 The amp is also quite portable, and can be easily powered with a phone through a USB-C cable.
@@ -119,5 +119,6 @@ sudo cp -r tcl/* /opt/homebrew/share/openocd/scripts/
 The software of this project is licensed under the [GPL-3.0-only](LICENSE).
 
 All the hardware files are licensed under the [CERN-OHL-S-2.0](Hardware/LICENSE).
+
 
 
