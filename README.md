@@ -15,6 +15,7 @@ The amp is also quite portable, and can be easily powered with a phone through a
 
 
 ![DA15 Front](Hardware/Images/Front.jpg)
+![DA15 Top](Hardware/Images/Open.jpg)
 ![DA15 PCB](Hardware/Images/PCB.jpg)
 
 For additional pictures, see [Hardware/Images](Hardware/Images/).
@@ -118,4 +119,5 @@ sudo cp -r tcl/* /opt/homebrew/share/openocd/scripts/
 The software of this project is licensed under the [GPL-3.0-only](LICENSE).
 
 All the hardware files are licensed under the [CERN-OHL-S-2.0](Hardware/LICENSE).
+
 
