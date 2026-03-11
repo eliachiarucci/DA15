@@ -37,6 +37,9 @@ add_executable(${CMAKE_PROJECT_NAME})
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)
 
+# CubeMX bug: EXTERNAL_CLOCK_VALUE defaults to 12288000 instead of 24576000
+target_compile_definitions(stm32cubemx INTERFACE EXTERNAL_CLOCK_VALUE=24576000UL)
+
 # TinyUSB paths
 set(TINYUSB_PATH "${CMAKE_CURRENT_SOURCE_DIR}/Lib/tinyusb")
 
@@ -57,6 +60,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     "App/Src/sh1106.c"
     "App/Src/encoder.c"
     "App/Src/settings.c"
+    "App/Src/eq_profile.c"
+    "App/Src/usb_comm.c"
 
     # SEGGER RTT
     "Lib/RTT/SEGGER_RTT.c"
@@ -74,7 +79,10 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # TinyUSB DFU Runtime class driver
     "${TINYUSB_PATH}/src/class/dfu/dfu_rt_device.c"
 
-    # TinyUSB STM32 FSDEV portable driver (for STM32F0)
+    # TinyUSB CDC class driver
+    "${TINYUSB_PATH}/src/class/cdc/cdc_device.c"
+
+    # TinyUSB STM32 FSDEV portable driver (for STM32H5)
     "${TINYUSB_PATH}/src/portable/st/stm32_fsdev/dcd_stm32_fsdev.c"
     "${TINYUSB_PATH}/src/portable/st/stm32_fsdev/fsdev_common.c"
 )
@@ -91,10 +99,16 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     "${TINYUSB_PATH}/src"
 )
 
+# Board options
+option(NO_POWER_SCALING "Disable USB-C CC power detection (headphone board)" OFF)
+option(NO_SWAP_CHANNELS "Disable L/R channel swapping" OFF)
+
 # Add project symbols (macros)
 target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
     # TinyUSB config location
-    CFG_TUSB_MCU=OPT_MCU_STM32F0
+    CFG_TUSB_MCU=OPT_MCU_STM32H5
+    $<$<BOOL:${NO_POWER_SCALING}>:NO_POWER_SCALING=1>
+    $<$<BOOL:${NO_SWAP_CHANNELS}>:NO_SWAP_CHANNELS=1>
 )
 
 # Remove wrong libob.a library dependency when using cpp files
@@ -103,6 +117,7 @@ list(REMOVE_ITEM CMAKE_C_IMPLICIT_LINK_LIBRARIES ob)
 # Add linked libraries
 target_link_libraries(${CMAKE_PROJECT_NAME}
     stm32cubemx
+    m
 
     # Add user defined libraries
 )

@@ -11,21 +11,43 @@
 #include "tusb.h"
 
 //--------------------------------------------------------------------+
+// Runtime String Updates
+//--------------------------------------------------------------------+
+#define USB_STRING_MAX_LEN  32
+
+const char *usb_desc_get_manufacturer(void);
+const char *usb_desc_get_product(void);
+const char *usb_desc_get_audio_itf(void);
+void usb_desc_set_manufacturer(const char *str);
+void usb_desc_set_product(const char *str);
+void usb_desc_set_audio_itf(const char *str);
+
+//--------------------------------------------------------------------+
 // Interface Numbers
 //--------------------------------------------------------------------+
 enum {
   ITF_NUM_AUDIO_CONTROL = 0,
   ITF_NUM_AUDIO_STREAMING,
   ITF_NUM_DFU,
+  ITF_NUM_CDC,
+  ITF_NUM_CDC_DATA,
   ITF_NUM_TOTAL
 };
 
 //--------------------------------------------------------------------+
 // Endpoint Numbers
 //--------------------------------------------------------------------+
-// STM32F0 can use same endpoint number for IN and OUT
+// STM32H5 can use same endpoint number for IN and OUT
 #define EPNUM_AUDIO_OUT       0x01
 #define EPNUM_AUDIO_FB        0x81  // 0x01 | 0x80 (IN direction)
+#define EPNUM_CDC_NOTIF       0x82  // CDC notification (IN)
+#define EPNUM_CDC_OUT         0x03  // CDC data (OUT)
+#define EPNUM_CDC_IN          0x83  // CDC data (IN)
+
+//--------------------------------------------------------------------+
+// MS OS 2.0 Vendor Request Code
+//--------------------------------------------------------------------+
+#define VENDOR_REQUEST_MICROSOFT  0x01
 
 //--------------------------------------------------------------------+
 // UAC1 Entity IDs (used in TUD_AUDIO10_SPEAKER_STEREO_FB_DESCRIPTOR)

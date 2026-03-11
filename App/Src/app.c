@@ -12,15 +12,18 @@
 #include "audio_output.h"
 #include "display.h"
 #include "encoder.h"
+#include "eq_profile.h"
 #include "main.h"
 #include "settings.h"
+#include "usb_descriptors.h"
 #include "sh1106.h"
-#include "stm32f0xx_hal.h"
+#include "stm32h5xx_hal.h"
 #include "tusb.h"
+#include "usb_comm.h"
 #include <stdint.h>
 
 // External handles from main.c
-extern ADC_HandleTypeDef hadc;
+extern ADC_HandleTypeDef hadc1;
 extern I2C_HandleTypeDef hi2c2;
 
 // ---------------------------------------------------------------------------
@@ -53,21 +56,21 @@ static uint8_t max_power_available = 0; // 0=500mA, 1=1500mA, 2=3000mA
 
 static uint16_t adc_read_next_mv(void) {
   uint16_t mv = 0;
-  if (HAL_ADC_PollForConversion(&hadc, 10) == HAL_OK) {
-    mv = (HAL_ADC_GetValue(&hadc) * 3300U) / 4095U;
+  if (HAL_ADC_PollForConversion(&hadc1, 10) == HAL_OK) {
+    mv = (HAL_ADC_GetValue(&hadc1) * 3300U) / 4095U;
   }
   HAL_Delay(50);
   return mv;
 }
 
 static void read_usb_detection_voltages(void) {
-  if (HAL_ADCEx_Calibration_Start(&hadc) != HAL_OK) {
+  if (HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED) != HAL_OK) {
     SEGGER_RTT_printf(0, "ADC calibration failed\n");
     return;
   }
   HAL_Delay(50);
 
-  if (HAL_ADC_Start(&hadc) != HAL_OK) {
+  if (HAL_ADC_Start(&hadc1) != HAL_OK) {
     SEGGER_RTT_printf(0, "ADC start failed\n");
     return;
   }
@@ -78,7 +81,7 @@ static void read_usb_detection_voltages(void) {
   SEGGER_RTT_printf(0, "CC1 Voltage : %dmV\n", cc1_voltage);
   SEGGER_RTT_printf(0, "CC2 Voltage: %dmV\n", cc2_voltage);
 
-  HAL_ADC_Stop(&hadc);
+  HAL_ADC_Stop(&hadc1);
 
   uint16_t highest_CC_voltage = cc1_voltage;
   if (cc2_voltage > highest_CC_voltage) {
@@ -99,7 +102,7 @@ uint8_t app_get_power_level(void) { return max_power_available; }
 // ---------------------------------------------------------------------------
 // DFU bootloader reboot
 // ---------------------------------------------------------------------------
-#define DFU_MAGIC_ADDR  ((volatile uint32_t *)0x20003FF0)
+#define DFU_MAGIC_ADDR  ((volatile uint32_t *)0x20007FF0)  // end of 32KB RAM
 #define DFU_MAGIC_VALUE 0xDEADBEEFUL
 
 void app_reboot_to_dfu(void) {
@@ -120,6 +123,19 @@ void tud_dfu_runtime_reboot_to_dfu_cb(void) { app_reboot_to_dfu(); }
 // ---------------------------------------------------------------------------
 // Settings helper
 // ---------------------------------------------------------------------------
+void app_save_settings(void) {
+  settings_t s = {
+      .local_volume = audio_output_get_local_volume(),
+      .local_muted = audio_output_is_local_muted(),
+      .bass = audio_eq_get_band(EQ_BAND_BASS),
+      .treble = audio_eq_get_band(EQ_BAND_TREBLE),
+      .brightness = display_get_brightness(),
+      .display_timeout = display_get_timeout_level(),
+      .active_profile = eq_profile_get_active(),
+  };
+  settings_save(&s);
+}
+
 static void mark_settings_dirty(uint32_t now) {
   settings_dirty = 1;
   settings_save_tick = now;
@@ -182,6 +198,59 @@ static void handle_encoder_rotate(int8_t delta, uint32_t now) {
       display_menu_navigate(delta);
     } else {
       switch (display_get_menu_cursor()) {
+      case MENU_PROFILE: {
+        uint8_t active = eq_profile_get_active();
+        if (delta > 0) {
+          // OFF → first profile → next → ... → OFF
+          if (active == EQ_PROFILE_OFF) {
+            // Find first non-empty profile
+            for (uint8_t i = 0; i < EQ_MAX_PROFILES; i++) {
+              if (eq_profile_get(i) != NULL) {
+                active = i;
+                break;
+              }
+            }
+          } else {
+            // Find next non-empty profile, wrap to OFF
+            uint8_t found = 0;
+            for (uint8_t i = active + 1; i < EQ_MAX_PROFILES; i++) {
+              if (eq_profile_get(i) != NULL) {
+                active = i;
+                found = 1;
+                break;
+              }
+            }
+            if (!found)
+              active = EQ_PROFILE_OFF;
+          }
+        } else {
+          // Reverse: OFF ← first ← next ← ... ← OFF
+          if (active == EQ_PROFILE_OFF) {
+            // Find last non-empty profile
+            for (int8_t i = EQ_MAX_PROFILES - 1; i >= 0; i--) {
+              if (eq_profile_get((uint8_t)i) != NULL) {
+                active = (uint8_t)i;
+                break;
+              }
+            }
+          } else {
+            // Find previous non-empty profile, wrap to OFF
+            uint8_t found = 0;
+            for (int8_t i = (int8_t)active - 1; i >= 0; i--) {
+              if (eq_profile_get((uint8_t)i) != NULL) {
+                active = (uint8_t)i;
+                found = 1;
+                break;
+              }
+            }
+            if (!found)
+              active = EQ_PROFILE_OFF;
+          }
+        }
+        eq_profile_set_active(active);
+        mark_settings_dirty(now);
+        display_set_dirty();
+      } break;
       case MENU_BASS: {
         int8_t v = (int8_t)clamp_i16(audio_eq_get_band(EQ_BAND_BASS) + delta,
                                       EQ_VALUE_MIN, EQ_VALUE_MAX);
@@ -219,35 +288,50 @@ static void handle_encoder_rotate(int8_t delta, uint32_t now) {
 // Initialization
 // ---------------------------------------------------------------------------
 void app_init(void) {
+  SEGGER_RTT_printf(0, "\n=== DA15 boot ===\n");
 
   // Read USB detection voltages (CC1, CC2, DN, DP)
   read_usb_detection_voltages();
 
   // Initialize OLED display
+  SEGGER_RTT_printf(0, "[init] OLED init...\n");
   sh1106_init(&hi2c2);
   HAL_Delay(1000);
 
   // Initialize audio output hardware
+  SEGGER_RTT_printf(0, "[init] audio output init...\n");
   audio_output_init();
 
   // Initialize TinyUSB device stack
+  SEGGER_RTT_printf(0, "[init] TinyUSB init...\n");
   tusb_rhport_init_t dev_init = {.role = TUSB_ROLE_DEVICE,
                                  .speed = TUSB_SPEED_AUTO};
   tusb_init(BOARD_TUD_RHPORT, &dev_init);
+  SEGGER_RTT_printf(0, "[init] TinyUSB init done\n");
 
   // Default EQ (flat)
   audio_eq_set_band(EQ_BAND_BASS, 0);
   audio_eq_set_band(EQ_BAND_TREBLE, 0);
 
+  // Initialize EQ profile store (load from flash)
+  SEGGER_RTT_printf(0, "[init] EQ profiles init...\n");
+  eq_profile_init();
+
+  // Initialize USB CDC communication
+  usb_comm_init();
+
   // Initialize encoder
   encoder_init();
+  SEGGER_RTT_printf(0, "[init] encoder done\n");
 
   // Load persistent settings
   uint8_t brightness = 1;
   uint8_t timeout = 0;
 
+  SEGGER_RTT_printf(0, "[init] loading settings...\n");
   settings_t saved;
   if (settings_load(&saved)) {
+    SEGGER_RTT_printf(0, "[init] settings loaded OK\n");
     audio_output_set_local_volume(saved.local_volume);
     if (saved.local_muted) {
       audio_output_toggle_local_mute();
@@ -256,10 +340,25 @@ void app_init(void) {
     audio_eq_set_band(EQ_BAND_TREBLE, saved.treble);
     brightness = saved.brightness;
     timeout = saved.display_timeout;
+    eq_profile_set_active(saved.active_profile);
+  } else {
+    SEGGER_RTT_printf(0, "[init] no valid settings, using defaults\n");
+  }
+
+  // Load persisted USB string descriptors
+  char mfr[33], prod[33], audio_itf[33];
+  if (settings_load_strings(mfr, prod, audio_itf)) {
+    usb_desc_set_manufacturer(mfr);
+    usb_desc_set_product(prod);
+    usb_desc_set_audio_itf(audio_itf);
+    SEGGER_RTT_printf(0, "[init] USB strings loaded: '%s' / '%s' / '%s'\n", mfr, prod, audio_itf);
   }
 
   // Initialize display module (applies brightness, starts activity timer)
+  SEGGER_RTT_printf(0, "[init] display init...\n");
   display_init(brightness, timeout);
+
+  SEGGER_RTT_printf(0, "[init] complete, entering main loop\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -268,9 +367,11 @@ void app_init(void) {
 void app_loop(void) {
   uint32_t now = HAL_GetTick();
 
-  // --- High priority: USB + audio ---
+  // --- High priority: USB + audio + flash ---
   tud_task();
   audio_output_task();
+  eq_profile_flash_task();
+  usb_comm_task();
 
   // --- USB connection monitoring (idle screen for OLED burn-in protection) ---
   // Any USB state change must hold stable for 3s before taking effect.
@@ -319,15 +420,7 @@ void app_loop(void) {
 
   // --- Debounced settings save ---
   if (settings_dirty && (now - settings_save_tick >= SETTINGS_SAVE_DELAY_MS)) {
-    settings_t s = {
-        .local_volume = audio_output_get_local_volume(),
-        .local_muted = audio_output_is_local_muted(),
-        .bass = audio_eq_get_band(EQ_BAND_BASS),
-        .treble = audio_eq_get_band(EQ_BAND_TREBLE),
-        .brightness = display_get_brightness(),
-        .display_timeout = display_get_timeout_level(),
-    };
-    settings_save(&s);
+    app_save_settings();
     settings_dirty = 0;
   }
 

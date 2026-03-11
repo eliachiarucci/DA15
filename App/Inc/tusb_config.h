@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Elia Chiarucci
 
 /*
- * TinyUSB Configuration for STM32F072 USB Audio (UAC1)
+ * TinyUSB Configuration for STM32H503 USB Audio (UAC1)
  */
 
 #ifndef _TUSB_CONFIG_H_
@@ -26,7 +26,7 @@ extern "C" {
 // Common Configuration
 //--------------------------------------------------------------------+
 
-#define CFG_TUSB_MCU          OPT_MCU_STM32F0
+#define CFG_TUSB_MCU          OPT_MCU_STM32H5
 #define CFG_TUSB_OS           OPT_OS_NONE
 
 // CFG_TUSB_DEBUG is defined by compiler in DEBUG build
@@ -51,7 +51,7 @@ extern "C" {
 
 //------------- CLASS -------------//
 #define CFG_TUD_AUDIO             1
-#define CFG_TUD_CDC               0
+#define CFG_TUD_CDC               1
 #define CFG_TUD_MSC               0
 #define CFG_TUD_HID               0
 #define CFG_TUD_MIDI              0
@@ -106,6 +106,13 @@ extern "C" {
 
 // Control buffer size
 #define CFG_TUD_AUDIO_FUNC_1_CTRL_BUF_SZ               64
+
+//--------------------------------------------------------------------+
+// CDC CLASS DRIVER CONFIGURATION
+//--------------------------------------------------------------------+
+
+#define CFG_TUD_CDC_RX_BUFSIZE    512
+#define CFG_TUD_CDC_TX_BUFSIZE    512
 
 #ifdef __cplusplus
 }

@@ -51,21 +51,30 @@ static inline int32_t mul_q12(int32_t a, int32_t b) {
 #define AUDIO_24BIT_MAX  8388607
 #define AUDIO_24BIT_MIN  (-8388608)
 
-// Fixed pre-attenuation: -5dB = 0.562 * 4096 = 2303
-#define PREATT_SCALE     2303
+// Exact dB gain table (Q12): additive gain for bandpass boost/cut
+// gain[n] = (10^(n/20) - 1) * 4096
+// At the band center: out = in + gain * bandpassed ≈ in * 10^(n/20) = +n dB
+static const int16_t gain_db_table[7] = {
+    0,      // 0 dB: bypass
+    500,    // 1 dB: 0.1220
+    1061,   // 2 dB: 0.2589
+    1690,   // 3 dB: 0.4125
+    2396,   // 4 dB: 0.5849
+    3188,   // 5 dB: 0.7783
+    4077,   // 6 dB: 0.9953
+};
 
-// Gain table: level 0-7 maps to gain in Q12
-// Extended to 7 to support +1 bass offset (user +6 = internal +7)
-// Linear from 0 to 1.167 at max
-static const int16_t gain_table[8] = {
-    0,      // level 0: bypass
-    683,    // level 1: 0.167 (1/6)
-    1365,   // level 2: 0.333 (2/6)
-    2048,   // level 3: 0.5   (3/6)
-    2731,   // level 4: 0.667 (4/6)
-    3413,   // level 5: 0.833 (5/6)
-    4096,   // level 6: 1.0   (6/6)
-    4779,   // level 7: 1.167 (7/6)
+// Dynamic pre-attenuation table (Q12): compensates for max boost
+// preatt[n] = 4096 / 10^(n/20)
+// Indexed by max(positive bass, positive treble)
+static const int16_t preatt_table[7] = {
+    4096,   // 0 dB: unity
+    3652,   // 1 dB
+    3254,   // 2 dB
+    2900,   // 3 dB
+    2585,   // 4 dB
+    2303,   // 5 dB
+    2053,   // 6 dB
 };
 
 //--------------------------------------------------------------------+
@@ -112,23 +121,10 @@ void audio_eq_set_band(uint8_t band, int8_t value) {
     if (value < -6) value = -6;
     else if (value > 6) value = 6;
 
-    if (band == EQ_BAND_BASS) {
-        if (bass_level != value) {
-            bass_hp_lp_left = 0;
-            bass_hp_lp_right = 0;
-            lp1_left = 0;
-            lp1_right = 0;
-            lp2_left = 0;
-            lp2_right = 0;
-            bass_level = value;
-        }
-    } else if (band == EQ_BAND_TREBLE) {
-        if (treble_level != value) {
-            treble_lp_left = 0;
-            treble_lp_right = 0;
-            treble_level = value;
-        }
-    }
+    if (band == EQ_BAND_BASS)
+        bass_level = value;
+    else if (band == EQ_BAND_TREBLE)
+        treble_level = value;
 }
 
 int8_t audio_eq_get_band(uint8_t band) {
@@ -166,40 +162,36 @@ bool audio_eq_is_enabled(void) {
     return eq_enabled;
 }
 
-void audio_eq_process(int32_t *buffer, uint16_t sample_count, uint16_t volume_scale) {
-    // If EQ disabled or all bands at effective 0, apply pre-attenuation + volume only
-    // Bass has +1 offset, so user's -1 is the true bypass point
-    if (!eq_enabled || (bass_level == -1 && treble_level == 0)) {
+void audio_eq_process(int32_t *buffer, uint16_t sample_count, uint32_t volume_scale) {
+    // If EQ disabled or all bands at 0, apply volume only (no pre-attenuation)
+    if (!eq_enabled || (bass_level == 0 && treble_level == 0)) {
         for (uint16_t i = 0; i < sample_count; i++) {
-            int32_t sample = mul_q12(buffer[i], PREATT_SCALE);
-            sample = (sample * volume_scale) >> 8;
-            buffer[i] = sample;
+            buffer[i] = (int32_t)(((int64_t)buffer[i] * volume_scale) >> 16);
         }
         return;
     }
 
-    // Apply +1 offset to bass so user's "0" gives a subtle boost (internal +1)
-    // User -6 to +6 maps to internal -5 to +7
-    int8_t effective_bass = bass_level + 1;
-    // No clamping needed - table now supports 0-8
-
-    int8_t abs_bass = effective_bass < 0 ? -effective_bass : effective_bass;
+    int8_t abs_bass = bass_level < 0 ? -bass_level : bass_level;
     int8_t abs_treble = treble_level < 0 ? -treble_level : treble_level;
-    int32_t bass_gain = gain_table[abs_bass];
-    bass_gain = (bass_gain << 1) + bass_gain;  // 3x multiplier for ~+13dB max bass
-    int32_t treble_gain = gain_table[abs_treble];
-    treble_gain = treble_gain + (treble_gain >> 2);  // 1.25x multiplier for treble
+    int32_t bass_gain = gain_db_table[abs_bass];
+    int32_t treble_gain = gain_db_table[abs_treble];
+
+    // Dynamic pre-attenuation: only attenuate enough to prevent clipping
+    // Bass and treble bands don't overlap, so use the max positive boost
+    int8_t max_boost = bass_level > treble_level ? bass_level : treble_level;
+    if (max_boost < 0) max_boost = 0;
+    int32_t preatt = preatt_table[max_boost];
 
     // Process stereo interleaved: L, R, L, R, ...
     // All filter math at full 24-bit precision using split-multiply
     for (uint16_t i = 0; i < sample_count; i += 2) {
-        // Fixed -5dB pre-attenuation for EQ headroom
-        int32_t out_l = mul_q12(buffer[i], PREATT_SCALE);
-        int32_t out_r = mul_q12(buffer[i + 1], PREATT_SCALE);
+        // Dynamic pre-attenuation for EQ headroom
+        int32_t out_l = mul_q12(buffer[i], preatt);
+        int32_t out_r = mul_q12(buffer[i + 1], preatt);
 
         // Bass processing (bandpass-style: highpass @50Hz + lowpass @180Hz + boost/cut)
         // This focuses the boost on "thump" frequencies (50-180Hz) instead of all bass
-        if (effective_bass != 0) {
+        if (bass_level != 0) {
             int32_t in_l = out_l;
             int32_t in_r = out_r;
 
@@ -220,7 +212,7 @@ void audio_eq_process(int32_t *buffer, uint16_t sample_count, uint16_t volume_sc
             // Boost (positive) or cut (negative): out = in ± gain * bandpassed
             int32_t bl = mul_q12(lp2_left, bass_gain);
             int32_t br = mul_q12(lp2_right, bass_gain);
-            if (effective_bass > 0) {
+            if (bass_level > 0) {
                 out_l = in_l + bl;
                 out_r = in_r + br;
             } else {
@@ -260,10 +252,10 @@ void audio_eq_process(int32_t *buffer, uint16_t sample_count, uint16_t volume_sc
         if (out_r > AUDIO_24BIT_MAX) out_r = AUDIO_24BIT_MAX;
         else if (out_r < AUDIO_24BIT_MIN) out_r = AUDIO_24BIT_MIN;
 
-        // Apply volume (24-bit * 8-bit = fits int32_t after clamp above)
-        if (volume_scale < 256) {
-            out_l = (out_l * volume_scale) >> 8;
-            out_r = (out_r * volume_scale) >> 8;
+        // Apply volume (24-bit * 16-bit via int64_t, single-cycle smull on M33)
+        if (volume_scale < 65536) {
+            out_l = (int32_t)(((int64_t)out_l * volume_scale) >> 16);
+            out_r = (int32_t)(((int64_t)out_r * volume_scale) >> 16);
         }
 
         buffer[i] = out_l;

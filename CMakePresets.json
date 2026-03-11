@@ -23,6 +23,16 @@
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release"
             }
+        },
+        {
+            "name": "Release-HA1",
+            "inherits": "default",
+            "binaryDir": "${sourceDir}/build/Release-HA1",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "NO_POWER_SCALING": "ON",
+                "NO_SWAP_CHANNELS": "ON"
+            }
         }
     ],
     "buildPresets": [
@@ -33,6 +43,10 @@
         {
             "name": "Release",
             "configurePreset": "Release"
+        },
+        {
+            "name": "Release-HA1",
+            "configurePreset": "Release-HA1"
         }
     ]
 }

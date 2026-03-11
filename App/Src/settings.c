@@ -4,23 +4,43 @@
 /*
  * Persistent Settings Storage
  *
- * Uses the last flash page (2KB at 0x0801F800) for sequential record writing.
- * Each record is 8 bytes: [magic, volume, muted, bass, treble, brightness, timeout, checksum].
- * Records are appended sequentially; when the page is full it is erased.
+ * Uses the last flash sector (8KB at 0x0801E000) for sequential record writing.
+ * Each record is 16 bytes (quad-word aligned):
+ *   [magic, volume, muted, bass, treble, brightness, timeout, profile, checksum, 0xFF x7]
+ * Records are appended sequentially; when the sector is full it is erased.
  * On load, the last valid record is used.
  *
- * STM32F072CB: 2KB pages, half-word (16-bit) programming.
+ * STM32H503: 8KB sectors, quad-word (128-bit / 16-byte) programming.
+ *
+ * ECC recovery: if power is lost during a quad-word flash write, the partially
+ * programmed word will have invalid ECC. Reading it triggers an NMI. The NMI
+ * handler sets settings_ecc_error, and settings_load() erases the sector and
+ * falls back to defaults.
  */
 
 #include "settings.h"
-#include "stm32f0xx_hal.h"
+#include "SEGGER_RTT.h"
+#include "stm32h5xx_hal.h"
+#include <string.h>
 
-#define SETTINGS_PAGE_ADDR  0x0801F800U
-#define SETTINGS_PAGE_SIZE  2048U
-#define RECORD_SIZE         8U
-#define MAX_RECORDS         (SETTINGS_PAGE_SIZE / RECORD_SIZE)
-#define RECORD_MAGIC        0xA6U
-#define ERASED_BYTE         0xFFU
+#define SETTINGS_BANK        FLASH_BANK_2 // Bank 2 (0x08010000–0x0801FFFF)
+#define SETTINGS_SECTOR      7U           // Last 8KB sector of bank 2
+#define SETTINGS_PAGE_ADDR   0x0801E000U  // Bank 2, Sector 7 base address
+#define SETTINGS_PAGE_SIZE   8192U        // 8KB sector
+#define RECORD_SIZE          16U          // Quad-word aligned (16 bytes)
+#define MAX_RECORDS          (SETTINGS_PAGE_SIZE / RECORD_SIZE)
+#define RECORD_MAGIC         0xA6U
+#define ERASED_BYTE          0xFFU
+
+// Strings record: 7 × 16 bytes = 112 bytes
+// Layout: [magic:1][manufacturer:32][product:32][audio_itf:32][checksum:1][pad:14]
+#define STRINGS_MAGIC        0xC3U
+#define STRINGS_RECORD_QUADS 7U
+#define STRINGS_RECORD_SIZE  (STRINGS_RECORD_QUADS * RECORD_SIZE) // 112 bytes
+#define STRINGS_CKSUM_LEN    97U  // bytes 0..96 covered by checksum
+
+// Set by NMI handler on flash ECC double-detection error
+volatile uint8_t settings_ecc_error = 0;
 
 static uint8_t compute_checksum(const uint8_t *rec, uint8_t len) {
     uint8_t cksum = 0;
@@ -29,17 +49,79 @@ static uint8_t compute_checksum(const uint8_t *rec, uint8_t len) {
     return cksum;
 }
 
+static bool erase_settings_page(void) {
+    HAL_FLASH_Unlock();
+
+    FLASH_EraseInitTypeDef erase = {
+        .TypeErase = FLASH_TYPEERASE_SECTORS,
+        .Banks     = SETTINGS_BANK,
+        .Sector    = SETTINGS_SECTOR,
+        .NbSectors = 1,
+    };
+    uint32_t sector_error = 0;
+    HAL_StatusTypeDef status = HAL_FLASHEx_Erase(&erase, &sector_error);
+
+    HAL_FLASH_Lock();
+
+    // Invalidate ICACHE so subsequent flash reads don't return stale data
+    HAL_ICACHE_Invalidate();
+
+    return status == HAL_OK;
+}
+
+static int find_next_free_slot(void) {
+    const uint8_t *base = (const uint8_t *)SETTINGS_PAGE_ADDR;
+    settings_ecc_error = 0;
+
+    for (int i = 0; i < (int)MAX_RECORDS; i++) {
+        const uint8_t *rec = base + (i * RECORD_SIZE);
+        uint8_t all_erased = 1;
+        for (uint8_t j = 0; j < RECORD_SIZE; j++) {
+            volatile uint8_t b = rec[j]; // volatile: read may trigger NMI
+            if (settings_ecc_error) {
+                erase_settings_page();
+                settings_ecc_error = 0;
+                return 0;
+            }
+            if (b != ERASED_BYTE) { all_erased = 0; break; }
+        }
+        if (all_erased) return i;
+    }
+    return -1;
+}
+
 bool settings_load(settings_t *out) {
     const uint8_t *base = (const uint8_t *)SETTINGS_PAGE_ADDR;
+
+    // Clear any pending ECC error state
+    settings_ecc_error = 0;
 
     // Scan backwards to find last valid record
     for (int i = (int)MAX_RECORDS - 1; i >= 0; i--) {
         const uint8_t *rec = base + (i * RECORD_SIZE);
-        if (rec[0] != RECORD_MAGIC) continue;
+        volatile uint8_t magic = rec[0]; // volatile: read may trigger NMI on ECC error
 
-        // Checksum covers bytes 0-6, stored in byte 7
-        uint8_t cksum = compute_checksum(rec, 7);
-        if (cksum != rec[7]) continue;
+        // If reading flash triggered an ECC error (NMI handler sets flag),
+        // the sector has a partially-written quad-word from a power loss.
+        // Erase it and return defaults.
+        if (settings_ecc_error) {
+            SEGGER_RTT_printf(0, "[settings] ECC error at record %d, erasing sector\n", i);
+            erase_settings_page();
+            settings_ecc_error = 0;
+            return false;
+        }
+
+        if (magic != RECORD_MAGIC) continue;
+
+        // Checksum covers bytes 0-7, stored in byte 8
+        uint8_t cksum = compute_checksum(rec, 8);
+        if (settings_ecc_error) {
+            SEGGER_RTT_printf(0, "[settings] ECC error at record %d, erasing sector\n", i);
+            erase_settings_page();
+            settings_ecc_error = 0;
+            return false;
+        }
+        if (cksum != rec[8]) continue;
 
         out->local_volume    = rec[1];
         out->local_muted     = rec[2];
@@ -47,53 +129,40 @@ bool settings_load(settings_t *out) {
         out->treble          = (int8_t)rec[4];
         out->brightness      = rec[5];
         out->display_timeout = rec[6];
+        out->active_profile  = rec[7];
         return true;
     }
 
     return false;
 }
 
-static int find_next_free_slot(void) {
-    const uint8_t *base = (const uint8_t *)SETTINGS_PAGE_ADDR;
-    for (int i = 0; i < (int)MAX_RECORDS; i++) {
-        const uint8_t *rec = base + (i * RECORD_SIZE);
-        uint8_t all_erased = 1;
-        for (uint8_t j = 0; j < RECORD_SIZE; j++) {
-            if (rec[j] != ERASED_BYTE) { all_erased = 0; break; }
-        }
-        if (all_erased) return i;
-    }
-    return -1;
-}
-
-static bool erase_settings_page(void) {
-    HAL_FLASH_Unlock();
-
-    FLASH_EraseInitTypeDef erase = {
-        .TypeErase   = FLASH_TYPEERASE_PAGES,
-        .PageAddress = SETTINGS_PAGE_ADDR,
-        .NbPages     = 1,
-    };
-    uint32_t page_error = 0;
-    HAL_StatusTypeDef status = HAL_FLASHEx_Erase(&erase, &page_error);
-
-    HAL_FLASH_Lock();
-    return status == HAL_OK;
-}
-
 bool settings_save(const settings_t *s) {
     int slot = find_next_free_slot();
 
     if (slot < 0) {
+        // Preserve strings across sector erase: read them before wiping
+        char mfr[33], prod[33], audio_itf[33];
+        bool had_strings = settings_load_strings(mfr, prod, audio_itf);
+
         if (!erase_settings_page()) {
             return false;
         }
         slot = 0;
+
+        // Re-write strings so they survive the erase
+        if (had_strings) {
+            if (!settings_save_strings(mfr, prod, audio_itf))
+                return false;
+            slot = find_next_free_slot();
+            if (slot < 0)
+                return false;
+        }
     }
 
     uint32_t addr = SETTINGS_PAGE_ADDR + (uint32_t)slot * RECORD_SIZE;
 
-    // Build record: [magic, volume, muted, bass, treble, brightness, timeout, checksum]
+    // Build 16-byte quad-word aligned record
+    // [magic, volume, muted, bass, treble, brightness, timeout, profile, checksum, pad x7]
     uint8_t rec[RECORD_SIZE];
     rec[0] = RECORD_MAGIC;
     rec[1] = s->local_volume;
@@ -102,15 +171,95 @@ bool settings_save(const settings_t *s) {
     rec[4] = (uint8_t)s->treble;
     rec[5] = s->brightness;
     rec[6] = s->display_timeout;
-    rec[7] = compute_checksum(rec, 7);
+    rec[7] = s->active_profile;
+    rec[8] = compute_checksum(rec, 8);
+    // Pad remaining bytes with 0xFF (erased state)
+    for (uint8_t i = 9; i < RECORD_SIZE; i++)
+        rec[i] = ERASED_BYTE;
 
-    // STM32F0 programs in half-words (16 bits): 8 bytes = 4 half-words
+    // STM32H5 programs in quad-words (128 bits = 16 bytes)
     HAL_FLASH_Unlock();
 
-    for (uint8_t i = 0; i < RECORD_SIZE; i += 2) {
-        uint16_t hw = ((uint16_t)rec[i + 1] << 8) | rec[i];
+    HAL_StatusTypeDef status = HAL_FLASH_Program(
+        FLASH_TYPEPROGRAM_QUADWORD, addr, (uint32_t)rec);
+    if (status != HAL_OK) {
+        HAL_FLASH_Lock();
+        return false;
+    }
+
+    HAL_FLASH_Lock();
+    HAL_ICACHE_Invalidate();
+    return true;
+}
+
+bool settings_load_strings(char manufacturer[33], char product[33], char audio_itf[33]) {
+    const uint8_t *base = (const uint8_t *)SETTINGS_PAGE_ADDR;
+    settings_ecc_error = 0;
+
+    // Scan backwards; a strings record occupies STRINGS_RECORD_QUADS consecutive slots
+    for (int i = (int)MAX_RECORDS - (int)STRINGS_RECORD_QUADS; i >= 0; i--) {
+        const uint8_t *rec = base + (i * RECORD_SIZE);
+
+        volatile uint8_t magic = rec[0]; // volatile: may trigger NMI on ECC error
+        if (settings_ecc_error) {
+            erase_settings_page();
+            settings_ecc_error = 0;
+            return false;
+        }
+        if (magic != STRINGS_MAGIC) continue;
+
+        // Verify checksum over bytes 0..96
+        uint8_t cksum = 0;
+        for (uint8_t j = 0; j < STRINGS_CKSUM_LEN; j++)
+            cksum ^= rec[j];
+
+        if (settings_ecc_error) {
+            erase_settings_page();
+            settings_ecc_error = 0;
+            return false;
+        }
+        if (cksum != rec[STRINGS_CKSUM_LEN]) continue;
+
+        memcpy(manufacturer, &rec[1],  32);
+        manufacturer[32] = '\0';
+        memcpy(product,      &rec[33], 32);
+        product[32] = '\0';
+        memcpy(audio_itf,    &rec[65], 32);
+        audio_itf[32] = '\0';
+        return true;
+    }
+    return false;
+}
+
+bool settings_save_strings(const char *manufacturer, const char *product, const char *audio_itf) {
+    int slot = find_next_free_slot();
+
+    if (slot < 0 || slot + (int)STRINGS_RECORD_QUADS > (int)MAX_RECORDS) {
+        if (!erase_settings_page()) return false;
+        slot = 0;
+    }
+
+    uint8_t rec[STRINGS_RECORD_SIZE];
+    memset(rec, ERASED_BYTE, sizeof(rec));
+
+    rec[0] = STRINGS_MAGIC;
+    strncpy((char *)&rec[1],  manufacturer, 32);
+    strncpy((char *)&rec[33], product,       32);
+    strncpy((char *)&rec[65], audio_itf,     32);
+
+    uint8_t cksum = 0;
+    for (uint8_t i = 0; i < STRINGS_CKSUM_LEN; i++)
+        cksum ^= rec[i];
+    rec[STRINGS_CKSUM_LEN] = cksum;
+
+    HAL_FLASH_Unlock();
+
+    uint32_t addr = SETTINGS_PAGE_ADDR + (uint32_t)slot * RECORD_SIZE;
+    for (uint8_t q = 0; q < STRINGS_RECORD_QUADS; q++) {
         HAL_StatusTypeDef status = HAL_FLASH_Program(
-            FLASH_TYPEPROGRAM_HALFWORD, addr + i, hw);
+            FLASH_TYPEPROGRAM_QUADWORD,
+            addr + q * RECORD_SIZE,
+            (uint32_t)&rec[q * RECORD_SIZE]);
         if (status != HAL_OK) {
             HAL_FLASH_Lock();
             return false;
@@ -118,5 +267,6 @@ bool settings_save(const settings_t *s) {
     }
 
     HAL_FLASH_Lock();
+    HAL_ICACHE_Invalidate();
     return true;
 }
