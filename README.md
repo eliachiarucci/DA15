@@ -1,19 +1,21 @@
 # DA15 - USB Audio DAC + Amplifier
 
-Firmware for the DA15 USB-C DAC/AMP.
+The goal of this project was to create a minimal amplifier for desktop use, using only a single USB-C cable for both data and power.
+The amp outputs a max of 4.2Vrms, which is often enough for a good listening experience in a small room with moderately sensitive speakers. I personally keep the volume at 30% most of the time.
+
 - **MCU**: STM32H503
 - **DAC**: PCM5102A
 - **AMP**: PAM8965
-- **Single USB-C cable**: for power and 24-bit/48kHz stereo audio (USB Audio Class 1).
-THD: 0.035%
+
 ![DA15 Front](Hardware/Images/Front.jpg)
 ![DA15 PCB Render](Hardware/Images/3D_Render.png)
 
-For more pictures, see [Hardware/Images](Hardware/Images/).
+For additional pictures, see [Hardware/Images](Hardware/Images/).
 
 
 ## Features
 
+- **Single USB-C cable**: for both power and audio (USB Audio Class 1, 24-bit/48kHz).
 - **Power** - 2 x 4.4W into 4Ω and 2 x 2.2W into 8Ω speakers (@ 0.035% THD). Can be set at max volume without losing quality.
 - **USB Audio Class 1** - 24-bit/48kHz stereo with dedicated 24.576mhz audio crystal.
 - **EQ** - Basic 2 bass and treble EQ or advanced EQ profiles via the [EQOS app](https://github.com/eliachiarucci/EQOS).
