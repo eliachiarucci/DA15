@@ -15,7 +15,7 @@ The amp is also quite portable, and can be easily powered with a phone through a
 
 
 ![DA15 Front](Hardware/Images/Front.jpg)
-![DA15 PCB Render](Hardware/Images/3D_Render.png)
+![DA15 PCB](Hardware/Images/PCB.jpg)
 
 For additional pictures, see [Hardware/Images](Hardware/Images/).
 
