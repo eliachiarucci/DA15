@@ -147,6 +147,7 @@ PA2.Signal=I2S1_CK
 PA4.Locked=true
 PA4.Mode=Half_Duplex_Master_Tx
 PA4.Signal=I2S1_SDO
+PA5.Locked=true
 PA5.Mode=Master_Clock_Activated
 PA5.Signal=I2S1_MCK
 PA7.Mode=Audio_ClockInSAI1

@@ -355,13 +355,15 @@ void eq_profile_process(int32_t *buffer, uint16_t sample_count,
         return;
 
     const float vol = (float)volume_scale * (1.0f / 65536.0f);
-    const float pre_vol = profile_preatt * vol;
+    const float pre_scale = profile_preatt * (1.0f / SAMPLE_SCALE);
 
     // Process stereo pairs
     for (uint16_t i = 0; i < sample_count; i += 2) {
+        // Apply pre-attenuation before biquads to prevent clipping
+        // from Q-dependent overshoot at shelf transition frequencies
         float samples[2] = {
-            (float)buffer[i]     * (1.0f / SAMPLE_SCALE),
-            (float)buffer[i + 1] * (1.0f / SAMPLE_SCALE),
+            (float)buffer[i]     * pre_scale,
+            (float)buffer[i + 1] * pre_scale,
         };
 
         // Run biquad cascade for each enabled filter
@@ -387,7 +389,7 @@ void eq_profile_process(int32_t *buffer, uint16_t sample_count,
 
         // Apply pre-attenuation + volume, convert back to int32_t
         for (uint8_t ch = 0; ch < 2; ch++) {
-            float out = samples[ch] * pre_vol * SAMPLE_SCALE;
+            float out = samples[ch] * vol * SAMPLE_SCALE;
 
             // Hard limit to 24-bit range
             if (out > SAMPLE_MAX) out = SAMPLE_MAX;
