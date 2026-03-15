@@ -58,6 +58,9 @@ This profile will use OpenOCD to flash the board, and will also spawn an RTT ter
 
 ## Flashing
 
+> **Note:** Upstream OpenOCD does not support the STM32H5 family. You need the [ST fork of OpenOCD](https://github.com/STMicroelectronics/OpenOCD) for debugging and flashing via ST-Link.
+> See below for [macOS install instructions](#installing-st-openocd-for-stm32h5-support-macos).
+
 **With ST-Link:**
 ```bash
 openocd -f interface/stlink.cfg -f target/stm32h5x.cfg \
@@ -70,7 +73,7 @@ Enter DFU mode from the device menu or run `dfu-util --detach`, then:
 dfu-util -a 0 -s 0x08000000:leave -D build/Release/DA15.bin
 ```
 
-STM32CubeProgrammer in USB DFU can also be used.
+STM32CubeProgrammer can also be used for both ST-Link and USB DFU flashing.
 
 
 ## Project Structure
@@ -119,6 +122,3 @@ sudo cp -r tcl/* /opt/homebrew/share/openocd/scripts/
 The software of this project is licensed under the [GPL-3.0-only](LICENSE).
 
 All the hardware files are licensed under the [CERN-OHL-S-2.0](Hardware/LICENSE).
-
-
-
