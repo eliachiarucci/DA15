@@ -40,7 +40,7 @@ For additional pictures, see [Hardware/Images](Hardware/Images/).
 The [STM32 VS Code Extension](https://marketplace.visualstudio.com/items?itemName=stmicroelectronics.stm32-vscode-extension) is recommended for development.
 
 ```bash
-cmake --preset Release # Debug won't work for audio playback as it's not optimised and the STM32F0 is not very powerful. 
+cmake --preset Release
 cmake --build build/Release
 ```
 
@@ -60,7 +60,7 @@ This profile will use OpenOCD to flash the board, and will also spawn an RTT ter
 
 **With ST-Link:**
 ```bash
-openocd -f interface/stlink.cfg -f target/stm32f0x.cfg \
+openocd -f interface/stlink.cfg -f target/stm32h5x.cfg \
   -c "program build/Release/DA15.elf verify reset exit"
 ```
 
@@ -80,7 +80,7 @@ App/           Application firmware
 ├── Inc/       Headers
 └── Src/       Implementation (audio pipeline, EQ, display, USB, settings)
 Core/          STM32CubeMX generated HAL init code
-Drivers/       STM32F0xx HAL library
+Drivers/       STM32H5xx HAL library
 Lib/           TinyUSB (USB stack), SEGGER RTT (debug)
 ```
 
@@ -111,7 +111,7 @@ sudo cp -r tcl/* /opt/homebrew/share/openocd/scripts/
 | Library | License | Purpose |
 |---------|---------|---------|
 | [TinyUSB](https://github.com/hathach/tinyusb) | MIT | USB Audio Class 1 stack |
-| [STM32F0 HAL](https://github.com/STMicroelectronics/stm32f0xx_hal_driver) | BSD-3-Clause | Hardware abstraction |
+| [STM32H5 HAL](https://github.com/STMicroelectronics/stm32h5xx-hal-driver) | BSD-3-Clause | Hardware abstraction |
 | [SEGGER RTT](https://www.segger.com/products/debug-probes/j-link/technology/about-real-time-transfer/) | BSD-1-Clause | Debug output (optional) |
 
 ## Licenses
