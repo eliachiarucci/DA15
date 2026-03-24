@@ -98,6 +98,9 @@ static uint8_t local_volume = 100; // 0-100, 100 = unity
 static uint8_t local_muted = 0;
 static uint8_t usb_muted = 0;
 
+// Volume ramping: smooths transitions to prevent clicks
+static uint32_t prev_volume_scale = 0;
+
 #if AUDIO_DEBUG
 // Debug counters
 static volatile uint32_t underrun_count = 0;
@@ -281,11 +284,26 @@ static uint16_t read_audio_data(uint16_t *i2s_dest,
   }
 #endif
 
-  // EQ + volume processing (operates on 24-bit values in int32_t)
+  // EQ processing (operates on 24-bit values in int32_t)
+  // Volume is applied separately below with per-sample ramping to prevent clicks
+  uint32_t cur_vol = get_volume_scale();
   if (eq_profile_get_active() != EQ_PROFILE_OFF)
-    eq_profile_process(proc, sample_count, get_volume_scale());
+    eq_profile_process(proc, sample_count, 65536);
   else
-    audio_eq_process(proc, sample_count, get_volume_scale());
+    audio_eq_process(proc, sample_count, 65536);
+
+  // Per-sample volume ramping: linearly interpolate from prev to current
+  // over the buffer to avoid step discontinuities (clicks) on volume changes.
+  // Uses fixed-point increment scaled by 1/sample_count.
+  if (cur_vol != prev_volume_scale || cur_vol < 65536) {
+    uint32_t v0 = prev_volume_scale;
+    int32_t delta = (int32_t)cur_vol - (int32_t)v0;
+    for (uint16_t i = 0; i < sample_count; i++) {
+      uint32_t v = v0 + (int32_t)(((int64_t)delta * i) / sample_count);
+      proc[i] = (int32_t)(((int64_t)proc[i] * v) >> 16);
+    }
+  }
+  prev_volume_scale = cur_vol;
 
   // Save last samples before packing (pack overwrites in-place)
   if (sample_count >= 2) {
