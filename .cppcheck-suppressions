@@ -1,0 +1,12 @@
+# cppcheck suppressions for DA15 (see scripts/static-analysis.sh)
+
+# Vendor headers (HAL, TinyUSB, CMSIS) are not on the include path on
+# purpose: analyzing them is out of scope and slow. Symbols cppcheck can't
+# resolve because of that are not findings.
+missingInclude
+missingIncludeSystem
+unknownMacro
+
+# cppcheck cannot see that TinyUSB / HAL callbacks and public module APIs
+# are referenced from vendor code or other translation units
+unusedFunction
