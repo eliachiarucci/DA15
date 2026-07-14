@@ -82,8 +82,9 @@ static float compute_profile_preatt(const eq_profile_t *prof) {
 // ---------------------------------------------------------------------------
 // Non-blocking flash write state machine
 // ---------------------------------------------------------------------------
-// Quad-words to write per main loop tick (~1ms at 30us/write)
-#define FLASH_WRITES_PER_TICK 32
+// Quad-words to write per main loop tick. Kept small so one tick's writes
+// stay well under the 2ms audio half-buffer deadline of the main loop.
+#define FLASH_WRITES_PER_TICK 8
 
 static eq_flash_status_t flash_op = EQ_FLASH_IDLE;
 static uint32_t flash_write_offset;
@@ -108,30 +109,45 @@ static uint32_t crc32_update(uint32_t crc, const uint8_t *data, uint32_t len) {
 }
 
 // ---------------------------------------------------------------------------
-// Flash helpers
-// ---------------------------------------------------------------------------
-static bool erase_profiles_sector(void) {
-    HAL_FLASH_Unlock();
-
-    FLASH_EraseInitTypeDef erase = {
-        .TypeErase = FLASH_TYPEERASE_SECTORS,
-        .Banks     = PROFILES_BANK,
-        .Sector    = PROFILES_SECTOR,
-        .NbSectors = 1,
-    };
-    uint32_t sector_error = 0;
-    HAL_StatusTypeDef status = HAL_FLASHEx_Erase(&erase, &sector_error);
-
-    HAL_FLASH_Lock();
-
-    return status == HAL_OK;
-}
-
-// ---------------------------------------------------------------------------
 // Profile management
 // ---------------------------------------------------------------------------
 static bool is_profile_empty(const eq_profile_t *p) {
     return p->name[0] == '\0' || p->filter_count == 0;
+}
+
+// ---------------------------------------------------------------------------
+// Coefficient validation
+// Host-supplied filters must never reach the amplifier unchecked: NaN/Inf
+// coefficients pass the output clamps (NaN comparisons are false) and an
+// unstable pole pair turns into full-scale oscillation.
+// ---------------------------------------------------------------------------
+static bool filter_is_sane(const eq_filter_t *f) {
+    if (!f->enabled || f->type == FILTER_OFF)
+        return true; // bypassed: never runs
+
+    if (!isfinite(f->b0) || !isfinite(f->b1) || !isfinite(f->b2) ||
+        !isfinite(f->a1) || !isfinite(f->a2) ||
+        !isfinite(f->freq) || !isfinite(f->gain) || !isfinite(f->q))
+        return false;
+
+    // BIBO stability triangle for the denominator: |a2| < 1, |a1| < 1 + a2
+    if (fabsf(f->a2) >= 1.0f)
+        return false;
+    if (fabsf(f->a1) >= 1.0f + f->a2)
+        return false;
+
+    return true;
+}
+
+static bool profile_is_sane(const eq_profile_t *p) {
+    uint8_t count = p->filter_count;
+    if (count > EQ_MAX_FILTERS)
+        count = EQ_MAX_FILTERS;
+    for (uint8_t f = 0; f < count; f++) {
+        if (!filter_is_sane(&p->filters[f]))
+            return false;
+    }
+    return true;
 }
 
 void eq_profile_init(void) {
@@ -144,6 +160,27 @@ void eq_profile_init(void) {
             0, (const uint8_t *)flash->profiles, sizeof(flash->profiles));
         if (crc == flash->checksum) {
             memcpy(&store, flash, sizeof(store));
+
+            // Drop any stored profile with corrupt/unstable coefficients
+            // (e.g. written by older firmware without validation)
+            uint8_t dropped = 0;
+            for (uint8_t i = 0; i < EQ_MAX_PROFILES; i++) {
+                if (!is_profile_empty(&store.profiles[i]) &&
+                    !profile_is_sane(&store.profiles[i])) {
+                    memset(&store.profiles[i], 0, sizeof(eq_profile_t));
+                    dropped++;
+                }
+            }
+            if (dropped) {
+                store.profile_count = 0;
+                for (uint8_t i = 0; i < EQ_MAX_PROFILES; i++) {
+                    if (!is_profile_empty(&store.profiles[i]))
+                        store.profile_count++;
+                }
+                SEGGER_RTT_printf(0, "[eq] dropped %d invalid profiles\n",
+                                  dropped);
+            }
+
             SEGGER_RTT_printf(0, "[eq] loaded %d profiles from flash\n",
                               store.profile_count);
             eq_profile_reset_state();
@@ -172,6 +209,8 @@ const eq_profile_t *eq_profile_get(uint8_t id) {
 
 bool eq_profile_set(uint8_t id, const eq_profile_t *p) {
     if (id >= EQ_MAX_PROFILES || p == NULL)
+        return false;
+    if (!profile_is_sane(p))
         return false;
 
     memcpy(&store.profiles[id], p, sizeof(eq_profile_t));
@@ -225,30 +264,52 @@ uint8_t eq_profile_count(void) {
 // Non-blocking flash save
 // ---------------------------------------------------------------------------
 bool eq_profile_start_flash_save(void) {
-    if (flash_op == EQ_FLASH_BUSY)
+    if (flash_op == EQ_FLASH_ERASING || flash_op == EQ_FLASH_BUSY)
         return false;
 
     // Update checksum
     store.checksum = crc32_update(
         0, (const uint8_t *)store.profiles, sizeof(store.profiles));
 
-    // Erase sector (blocking ~1-2ms, fits within one 5ms DMA half-buffer)
-    if (!erase_profiles_sector()) {
-        SEGGER_RTT_printf(0, "[eq] flash erase failed\n");
-        flash_op = EQ_FLASH_DONE_ERR;
-        return true; // Operation started, will report error via status
-    }
-
-    // Prepare for incremental writes
-    flash_write_total = (sizeof(eq_profile_store_t) + 15U) & ~15U;
-    flash_write_offset = 0;
-    flash_op = EQ_FLASH_BUSY;
-
+    // Start the sector erase WITHOUT waiting for completion: the sector is
+    // in bank 2 while code executes from bank 1 (read-while-write), so the
+    // CPU — and the audio loop — keep running. Completion is polled in
+    // eq_profile_flash_task().
     HAL_FLASH_Unlock();
+    __HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_ALL_ERRORS);
+    FLASH_Erase_Sector(PROFILES_SECTOR, PROFILES_BANK);
+    flash_op = EQ_FLASH_ERASING;
     return true;
 }
 
 void eq_profile_flash_task(void) {
+    if (flash_op == EQ_FLASH_ERASING) {
+        // Same completion condition FLASH_WaitForLastOperation polls on.
+        // BSY latches as soon as START is written (the blocking HAL erase
+        // relies on the same behavior), and this task first runs a full
+        // main-loop pass after the erase was started.
+        if ((FLASH_NS->NSSR &
+             (FLASH_FLAG_BSY | FLASH_FLAG_WBNE | FLASH_FLAG_DBNE)) != 0U)
+            return;
+
+        // Deassert the erase request (mirrors the tail of HAL_FLASHEx_Erase)
+        CLEAR_BIT(FLASH_NS->NSCR, FLASH_CR_SER | FLASH_CR_SNB | FLASH_CR_BKSEL);
+
+        if (__HAL_FLASH_GET_FLAG(FLASH_FLAG_ALL_ERRORS)) {
+            __HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_ALL_ERRORS);
+            HAL_FLASH_Lock();
+            SEGGER_RTT_printf(0, "[eq] flash erase failed\n");
+            flash_op = EQ_FLASH_DONE_ERR;
+            return;
+        }
+
+        // Erase done — start incremental writes on the next ticks
+        flash_write_total = (sizeof(eq_profile_store_t) + 15U) & ~15U;
+        flash_write_offset = 0;
+        flash_op = EQ_FLASH_BUSY;
+        return;
+    }
+
     if (flash_op != EQ_FLASH_BUSY)
         return;
 
@@ -262,7 +323,7 @@ void eq_profile_flash_task(void) {
         if (flash_write_offset + 16 <= total) {
             // Full quad-word from source
             if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_QUADWORD, addr,
-                                  (uint32_t)(src + flash_write_offset)) != HAL_OK) {
+                                  (uint32_t)(uintptr_t)(src + flash_write_offset)) != HAL_OK) {
                 HAL_FLASH_Lock();
                 SEGGER_RTT_printf(0, "[eq] flash write failed at offset %lu\n",
                                   flash_write_offset);
@@ -275,7 +336,7 @@ void eq_profile_flash_task(void) {
             uint32_t remaining = total - flash_write_offset;
             memcpy(flash_pad_buf, src + flash_write_offset, remaining);
             if (HAL_FLASH_Program(FLASH_TYPEPROGRAM_QUADWORD, addr,
-                                  (uint32_t)flash_pad_buf) != HAL_OK) {
+                                  (uint32_t)(uintptr_t)flash_pad_buf) != HAL_OK) {
                 HAL_FLASH_Lock();
                 SEGGER_RTT_printf(0, "[eq] flash write failed at offset %lu\n",
                                   flash_write_offset);
@@ -300,6 +361,10 @@ eq_flash_status_t eq_profile_flash_status(void) {
     if (s == EQ_FLASH_DONE_OK || s == EQ_FLASH_DONE_ERR)
         flash_op = EQ_FLASH_IDLE;
     return s;
+}
+
+bool eq_profile_flash_busy(void) {
+    return flash_op == EQ_FLASH_ERASING || flash_op == EQ_FLASH_BUSY;
 }
 
 // ---------------------------------------------------------------------------

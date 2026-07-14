@@ -13,6 +13,7 @@
 #include "audio_output.h"
 #include "display.h"
 #include "eq_profile.h"
+#include "fault.h"
 #include "settings.h"
 #include "usb_descriptors.h"
 #include "stm32h5xx_hal.h"
@@ -67,12 +68,57 @@ static uint8_t rx_buf[MAX_PAYLOAD_SIZE];
 // TX buffer (reuse for responses)
 static uint8_t tx_buf[FRAME_HEADER_SIZE + 1 + MAX_PAYLOAD_SIZE + FRAME_CRC_SIZE];
 
+// Pending-TX state: a response larger than the free CDC FIFO space is
+// drained incrementally from usb_comm_task() instead of being truncated.
+static uint16_t tx_len = 0;         // total frame length to send
+static uint16_t tx_pos = 0;         // bytes handed to the CDC FIFO so far
+static uint32_t tx_progress_tick = 0; // last tick with forward progress
+
+// Drop a stalled response after this long with zero progress (host not
+// draining / port closed) so the RX path can't deadlock
+#define TX_STALL_TIMEOUT_MS 500
+
 // Deferred response for async operations (e.g. SAVE_TO_FLASH)
 static uint8_t deferred_cmd = 0;
 
 // ---------------------------------------------------------------------------
 // Response helpers
 // ---------------------------------------------------------------------------
+static bool tx_pending(void) {
+    return tx_pos < tx_len;
+}
+
+// Push pending response bytes into the CDC FIFO. Never blocks.
+static void tx_pump(void) {
+    if (!tx_pending())
+        return;
+
+    uint32_t n = tud_cdc_write(&tx_buf[tx_pos], (uint32_t)(tx_len - tx_pos));
+    tud_cdc_write_flush();
+
+    if (n > 0) {
+        tx_pos += (uint16_t)n;
+        tx_progress_tick = HAL_GetTick();
+    } else if (HAL_GetTick() - tx_progress_tick > TX_STALL_TIMEOUT_MS) {
+        // Host stopped draining: drop the response so RX can resume
+        tx_len = 0;
+        tx_pos = 0;
+    }
+}
+
+// Blocking drain for pre-reset paths (DFU / reboot): make a best effort to
+// get the response all the way out before the device disappears.
+static void tx_drain_blocking(uint32_t timeout_ms) {
+    uint32_t start = HAL_GetTick();
+    while (HAL_GetTick() - start < timeout_ms) {
+        tud_task();
+        tx_pump();
+        if (!tx_pending() &&
+            tud_cdc_write_available() == CFG_TUD_CDC_TX_BUFSIZE)
+            break; // frame fully handed to the USB stack
+    }
+}
+
 static void send_response(uint8_t cmd, uint8_t status,
                           const uint8_t *payload, uint16_t payload_len) {
     uint16_t total_payload = 1 + payload_len; // status + payload
@@ -87,8 +133,10 @@ static void send_response(uint8_t cmd, uint8_t status,
     tx_buf[frame_len] = crc8(tx_buf, frame_len);
     frame_len += FRAME_CRC_SIZE;
 
-    tud_cdc_write(tx_buf, frame_len);
-    tud_cdc_write_flush();
+    tx_len = frame_len;
+    tx_pos = 0;
+    tx_progress_tick = HAL_GetTick();
+    tx_pump();
 }
 
 static void send_ok(uint8_t cmd, const uint8_t *payload, uint16_t len) {
@@ -255,7 +303,7 @@ static void handle_set_audio_itf(void) {
 
 static void handle_enter_dfu(void) {
     send_ok(CMD_ENTER_DFU, NULL, 0);
-    tud_cdc_write_flush();
+    tx_drain_blocking(50);
     app_reboot_to_dfu();
 }
 
@@ -302,6 +350,35 @@ static void handle_set_amp(void) {
     send_ok(CMD_SET_AMP, NULL, 0);
 }
 
+// Response: [present:1][reset_cause:1][type:1][count:1]
+//           [uptime:4][cfsr:4][hfsr:4][mmfar:4][bfar:4][msp:4][psp:4] (LE)
+static void handle_get_fault_info(void) {
+    fault_record_t rec;
+    bool present = fault_get_last(&rec);
+
+    uint8_t resp[32];
+    memset(resp, 0, sizeof(resp));
+    resp[0] = present ? 1 : 0;
+    resp[1] = fault_get_reset_cause();
+    if (present) {
+        resp[2] = rec.type;
+        resp[3] = rec.count;
+        memcpy(&resp[4], &rec.uptime_ms, 4);
+        memcpy(&resp[8], &rec.cfsr, 4);
+        memcpy(&resp[12], &rec.hfsr, 4);
+        memcpy(&resp[16], &rec.mmfar, 4);
+        memcpy(&resp[20], &rec.bfar, 4);
+        memcpy(&resp[24], &rec.msp, 4);
+        memcpy(&resp[28], &rec.psp, 4);
+    }
+    send_ok(CMD_GET_FAULT_INFO, resp, sizeof(resp));
+}
+
+static void handle_clear_fault(void) {
+    fault_clear();
+    send_ok(CMD_CLEAR_FAULT, NULL, 0);
+}
+
 static void handle_reboot(void) {
     // Persist any pending string changes to flash before resetting
     if (!settings_save_strings(usb_desc_get_manufacturer(),
@@ -312,10 +389,7 @@ static void handle_reboot(void) {
     }
 
     send_ok(CMD_REBOOT, NULL, 0);
-    tud_cdc_write_flush();
-    uint32_t deadline = HAL_GetTick() + 20;
-    while (HAL_GetTick() < deadline)
-        tud_task();
+    tx_drain_blocking(50);
     NVIC_SystemReset();
 }
 
@@ -352,6 +426,8 @@ static void dispatch_command(void) {
     case CMD_GET_AMP:           handle_get_amp();          break;
     case CMD_SET_DAC:           handle_set_dac();          break;
     case CMD_SET_AMP:           handle_set_amp();          break;
+    case CMD_GET_FAULT_INFO:    handle_get_fault_info();   break;
+    case CMD_CLEAR_FAULT:       handle_clear_fault();      break;
     case CMD_ENTER_DFU:         handle_enter_dfu();        break;
     case CMD_GET_DFU_SERIAL:    handle_get_dfu_serial();   break;
     case CMD_REBOOT:            handle_reboot();           break;
@@ -370,6 +446,13 @@ void usb_comm_init(void) {
 }
 
 void usb_comm_task(void) {
+    // Finish sending any pending response before doing anything else.
+    // While a response is pending, RX bytes stay buffered in the CDC FIFO
+    // (natural backpressure) so tx_buf is never overwritten mid-send.
+    tx_pump();
+    if (tx_pending())
+        return;
+
     // Check for deferred flash save response
     if (deferred_cmd == CMD_SAVE_TO_FLASH) {
         eq_flash_status_t s = eq_profile_flash_status();
@@ -432,6 +515,11 @@ void usb_comm_task(void) {
                 dispatch_command();
 
             rx_state = RX_WAIT_CMD;
+
+            // If the response didn't fit in the CDC FIFO in one go, stop
+            // processing further commands until it has fully drained
+            if (tx_pending())
+                return;
         } break;
         }
     }

@@ -40,7 +40,10 @@ extern I2S_HandleTypeDef hi2s1;
 // Audio format: 48kHz, 24-bit stereo in 32-bit I2S frames
 // USB: 3 bytes per sample (packed 24-bit)
 // I2S: 32-bit frames = 2 x uint16_t per channel
-#define STEREO_FRAMES_PER_HALF 240 // 4ms at 48kHz
+// Small halves keep the FIFO drain granularity fine-grained, so the FIFO
+// level never swings far below the feedback target (low latency + robust).
+// The main loop must run at least once per half period (2ms).
+#define STEREO_FRAMES_PER_HALF 96 // 2ms at 48kHz
 
 // I2S DMA buffer: 4 uint16_t per stereo frame (2 per channel in 32-bit mode)
 #define I2S_HALFWORDS_PER_HALF (STEREO_FRAMES_PER_HALF * 4) // 384
@@ -56,11 +59,11 @@ extern I2S_HandleTypeDef hi2s1;
 // Mono samples per half (L + R)
 #define MONO_SAMPLES_PER_HALF (STEREO_FRAMES_PER_HALF * 2) // 192
 
-// Pre-buffer threshold: wait for this much data before starting DMA
-// Wait for 4x the half-buffer size (~8ms) to give feedback mechanism time to
-// stabilize Must be less than CFG_TUD_AUDIO_FUNC_1_EP_OUT_SW_BUF_SZ (16 * 294 =
-// 4704 bytes)
-#define PREBUFFER_THRESHOLD (USB_BYTES_PER_HALF * 3)
+// Pre-buffer threshold: wait until the FIFO holds the level the feedback
+// endpoint regulates to (half the EP OUT software buffer, ~8ms — see
+// tud_audio_feedback_params_cb) before consuming, so there is no slow
+// post-start drift from the start level down to the feedback target.
+#define PREBUFFER_THRESHOLD (CFG_TUD_AUDIO_FUNC_1_EP_OUT_SW_BUF_SZ / 2)
 
 // PCM5102A anti-pop: 1 LSB DC offset prevents the DAC's Zero Data Detect
 // from engaging analog mute during silence. Inaudible (AC-coupled output).
@@ -113,10 +116,10 @@ static volatile int16_t fifo_min_delta = 0;   // min deviation from midpoint
 static volatile int16_t fifo_max_delta = 0;   // max deviation from midpoint
 static volatile int32_t fifo_sum_delta = 0;    // sum for averaging
 static volatile uint16_t fifo_sample_count = 0; // number of samples
-#define FIFO_MIDPOINT (PREBUFFER_THRESHOLD / 2)
+#define FIFO_MIDPOINT PREBUFFER_THRESHOLD // == feedback regulation target
 
 static void fifo_track_level(void) {
-  int16_t delta = (int16_t)usb_audio_available() - FIFO_MIDPOINT;
+  int16_t delta = (int16_t)usb_audio_available() - (int16_t)FIFO_MIDPOINT;
   if (fifo_sample_count == 0) {
     fifo_min_delta = delta;
     fifo_max_delta = delta;
@@ -294,16 +297,24 @@ static uint16_t read_audio_data(uint16_t *i2s_dest,
 
   // Per-sample volume ramping: linearly interpolate from prev to current
   // over the buffer to avoid step discontinuities (clicks) on volume changes.
-  // Uses fixed-point increment scaled by 1/sample_count.
-  if (cur_vol != prev_volume_scale || cur_vol < 65536) {
-    uint32_t v0 = prev_volume_scale;
-    int32_t delta = (int32_t)cur_vol - (int32_t)v0;
+  // Incremental Q16.16 step — one division per buffer, not per sample.
+  if (cur_vol != prev_volume_scale) {
+    int64_t acc = (int64_t)prev_volume_scale << 16;
+    int64_t step =
+        (((int64_t)cur_vol - (int64_t)prev_volume_scale) << 16) / sample_count;
     for (uint16_t i = 0; i < sample_count; i++) {
-      uint32_t v = v0 + (int32_t)(((int64_t)delta * i) / sample_count);
+      uint32_t v = (uint32_t)(acc >> 16);
       proc[i] = (int32_t)(((int64_t)proc[i] * v) >> 16);
+      acc += step;
+    }
+    prev_volume_scale = cur_vol;
+  } else if (cur_vol < 65536) {
+    // Steady non-unity volume: flat gain
+    for (uint16_t i = 0; i < sample_count; i++) {
+      proc[i] = (int32_t)(((int64_t)proc[i] * cur_vol) >> 16);
     }
   }
-  prev_volume_scale = cur_vol;
+  // Steady unity volume: nothing to apply
 
   // Save last samples before packing (pack overwrites in-place)
   if (sample_count >= 2) {
@@ -357,8 +368,12 @@ void audio_output_init(void) {
   unmute_dac();
   SEGGER_RTT_printf(0, "[audio] DAC unmuted, waiting 500ms...\n");
 
-  // Let DAC output settle, then enable amplifier into a stable signal
-  HAL_Delay(500);
+  // Let DAC output settle, then enable amplifier into a stable signal.
+  // Pump the USB stack while waiting so enumeration is not stalled.
+  uint32_t settle_start = HAL_GetTick();
+  while (HAL_GetTick() - settle_start < 500) {
+    tud_task();
+  }
   enable_amplifier();
   SEGGER_RTT_printf(0, "[audio] amp enabled, init done\n");
 }
@@ -541,6 +556,25 @@ static void update_mute_state(void) {
 
 void audio_output_set_mute(uint8_t mute) {
   usb_muted = mute;
+}
+
+// USB bus suspend: disable the amplifier (bulk of the power draw) and
+// hard-mute the DAC until the bus resumes.
+void audio_output_bus_suspend(void) {
+  if (!dma_running)
+    return;
+  disable_amplifier();
+  mute_dac();
+}
+
+// USB bus resume: restore the mute state, then re-enable the amplifier.
+// I2S kept outputting DC-offset silence throughout suspend, so the DAC
+// output is settled and the PCM5102A XSMT soft-unmute ramp is pop-free.
+void audio_output_bus_resume(void) {
+  if (!dma_running)
+    return;
+  update_mute_state();
+  enable_amplifier();
 }
 
 void audio_output_set_local_volume(uint8_t vol) {

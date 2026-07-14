@@ -18,4 +18,8 @@ void app_reboot_to_dfu(void);
 // Save current settings (volume, EQ, active profile, etc.) to flash immediately
 void app_save_settings(void);
 
+// Force the analog path silent (DAC mute + amp off) via direct register
+// writes — safe to call from any fault handler context
+void app_fault_safe_state(void);
+
 #endif

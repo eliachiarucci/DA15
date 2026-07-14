@@ -235,8 +235,23 @@ bool settings_save_strings(const char *manufacturer, const char *product, const 
     int slot = find_next_free_slot();
 
     if (slot < 0 || slot + (int)STRINGS_RECORD_QUADS > (int)MAX_RECORDS) {
+        // Preserve the last settings record across the sector erase
+        // (mirror of settings_save, which preserves the strings record)
+        settings_t saved;
+        bool had_settings = settings_load(&saved);
+
         if (!erase_settings_page()) return false;
         slot = 0;
+
+        if (had_settings) {
+            // Sector is freshly erased: settings_save finds a free slot
+            // immediately and cannot recurse back here
+            if (!settings_save(&saved))
+                return false;
+            slot = find_next_free_slot();
+            if (slot < 0 || slot + (int)STRINGS_RECORD_QUADS > (int)MAX_RECORDS)
+                return false;
+        }
     }
 
     uint8_t rec[STRINGS_RECORD_SIZE];

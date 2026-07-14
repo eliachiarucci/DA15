@@ -9,6 +9,8 @@
 #include "app.h"
 #include "SEGGER_RTT.h"
 #include "audio_eq.h"
+#include "fault.h"
+#include "version.h"
 #include "audio_output.h"
 #include "display.h"
 #include "encoder.h"
@@ -25,6 +27,63 @@
 // External handles from main.c
 extern ADC_HandleTypeDef hadc1;
 extern I2C_HandleTypeDef hi2c2;
+
+// ---------------------------------------------------------------------------
+// Interrupt priority tiers
+// CubeMX generates everything at priority 0; re-tier here (survives
+// regeneration). Lower number = higher priority.
+// ---------------------------------------------------------------------------
+static void configure_nvic_priorities(void) {
+  HAL_NVIC_SetPriority(GPDMA1_Channel0_IRQn, 0, 0); // I2S feed: hard deadline
+  HAL_NVIC_SetPriority(USB_DRD_FS_IRQn, 1, 0);      // USB events
+  HAL_NVIC_SetPriority(GPDMA2_Channel0_IRQn, 2, 0); // display DMA
+  HAL_NVIC_SetPriority(I2C2_EV_IRQn, 2, 0);
+  HAL_NVIC_SetPriority(I2C2_ER_IRQn, 2, 0);
+  HAL_NVIC_SetPriority(EXTI14_IRQn, 3, 0);          // encoder (bouncy)
+  HAL_NVIC_SetPriority(EXTI15_IRQn, 3, 0);
+}
+
+// ---------------------------------------------------------------------------
+// Independent watchdog (register-level: IWDG HAL module is not vendored)
+// LSI 32kHz / 32 = 1kHz; reload 999 -> ~1s timeout. Started at the end of
+// app_init, refreshed every app_loop pass. A software-started IWDG does not
+// survive NVIC_SystemReset, so DFU/bootloader entry is unaffected.
+// ---------------------------------------------------------------------------
+#define IWDG_KEY_ENABLE  0x0000CCCCU
+#define IWDG_KEY_ACCESS  0x00005555U
+#define IWDG_KEY_REFRESH 0x0000AAAAU
+
+static void watchdog_start(void) {
+  IWDG->KR  = IWDG_KEY_ENABLE;
+  IWDG->KR  = IWDG_KEY_ACCESS;
+  IWDG->PR  = IWDG_PR_PR_1 | IWDG_PR_PR_0; // prescaler /32
+  IWDG->RLR = 999;
+  while (IWDG->SR & (IWDG_SR_PVU | IWDG_SR_RVU)) {
+  }
+  IWDG->KR = IWDG_KEY_REFRESH;
+}
+
+static inline void watchdog_refresh(void) { IWDG->KR = IWDG_KEY_REFRESH; }
+
+// ---------------------------------------------------------------------------
+// Fault safe state: force the analog path silent from any fault context.
+// Direct register writes only — must work with a corrupted HAL/stack.
+// ---------------------------------------------------------------------------
+void app_fault_safe_state(void) {
+  DAC_MUTE_GPIO_Port->BSRR = (uint32_t)DAC_MUTE_Pin << 16U; // DAC hard mute
+  AMP_EN_GPIO_Port->BSRR   = (uint32_t)AMP_EN_Pin << 16U;   // amplifier off
+}
+
+// ---------------------------------------------------------------------------
+// Init-time wait that keeps the USB stack serviced, so enumeration
+// proceeds during the boot delays instead of after them
+// ---------------------------------------------------------------------------
+static void delay_ms_with_usb(uint32_t ms) {
+  uint32_t start = HAL_GetTick();
+  while (HAL_GetTick() - start < ms) {
+    tud_task();
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Settings save debounce
@@ -59,7 +118,7 @@ static uint16_t adc_read_next_mv(void) {
   if (HAL_ADC_PollForConversion(&hadc1, 10) == HAL_OK) {
     mv = (HAL_ADC_GetValue(&hadc1) * 3300U) / 4095U;
   }
-  HAL_Delay(50);
+  delay_ms_with_usb(50);
   return mv;
 }
 
@@ -68,7 +127,7 @@ static void read_usb_detection_voltages(void) {
     SEGGER_RTT_printf(0, "ADC calibration failed\n");
     return;
   }
-  HAL_Delay(50);
+  delay_ms_with_usb(50);
 
   if (HAL_ADC_Start(&hadc1) != HAL_OK) {
     SEGGER_RTT_printf(0, "ADC start failed\n");
@@ -111,7 +170,9 @@ void app_reboot_to_dfu(void) {
   sh1106_write_string_centered("UPDATE MODE", 28);
   sh1106_update();
 
-  while (sh1106_is_busy()) {}
+  // Bounded wait: a wedged I2C bus must not block DFU entry (our recovery path)
+  uint32_t start = HAL_GetTick();
+  while (sh1106_is_busy() && HAL_GetTick() - start < 100) {}
 
   *DFU_MAGIC_ADDR = DFU_MAGIC_VALUE;
   NVIC_SystemReset();
@@ -288,7 +349,24 @@ static void handle_encoder_rotate(int8_t delta, uint32_t now) {
 // Initialization
 // ---------------------------------------------------------------------------
 void app_init(void) {
-  SEGGER_RTT_printf(0, "\n=== DA15 boot ===\n");
+  SEGGER_RTT_printf(0, "\n=== DA15 boot (FW v" FW_VERSION_STRING ") ===\n");
+
+  // Log reset cause + any fault stored before the last reset
+  fault_boot_report();
+
+  // Re-tier interrupt priorities (CubeMX sets everything to 0)
+  configure_nvic_priorities();
+
+  // Per-unit USB serial from the device UID — before tusb_init
+  usb_desc_init_serial();
+
+  // Initialize TinyUSB first: enumeration then proceeds during the init
+  // delays below (which all pump tud_task) instead of after them
+  SEGGER_RTT_printf(0, "[init] TinyUSB init...\n");
+  tusb_rhport_init_t dev_init = {.role = TUSB_ROLE_DEVICE,
+                                 .speed = TUSB_SPEED_AUTO};
+  tusb_init(BOARD_TUD_RHPORT, &dev_init);
+  SEGGER_RTT_printf(0, "[init] TinyUSB init done\n");
 
   // Read USB detection voltages (CC1, CC2, DN, DP)
   read_usb_detection_voltages();
@@ -296,18 +374,11 @@ void app_init(void) {
   // Initialize OLED display
   SEGGER_RTT_printf(0, "[init] OLED init...\n");
   sh1106_init(&hi2c2);
-  HAL_Delay(1000);
+  delay_ms_with_usb(1000);
 
   // Initialize audio output hardware
   SEGGER_RTT_printf(0, "[init] audio output init...\n");
   audio_output_init();
-
-  // Initialize TinyUSB device stack
-  SEGGER_RTT_printf(0, "[init] TinyUSB init...\n");
-  tusb_rhport_init_t dev_init = {.role = TUSB_ROLE_DEVICE,
-                                 .speed = TUSB_SPEED_AUTO};
-  tusb_init(BOARD_TUD_RHPORT, &dev_init);
-  SEGGER_RTT_printf(0, "[init] TinyUSB init done\n");
 
   // Default EQ (flat)
   audio_eq_set_band(EQ_BAND_BASS, 0);
@@ -358,6 +429,10 @@ void app_init(void) {
   SEGGER_RTT_printf(0, "[init] display init...\n");
   display_init(brightness, timeout);
 
+  // Start the watchdog last: init (with its long settle delays) is done and
+  // the main loop must now run at least once a second
+  watchdog_start();
+
   SEGGER_RTT_printf(0, "[init] complete, entering main loop\n");
 }
 
@@ -366,6 +441,8 @@ void app_init(void) {
 // ---------------------------------------------------------------------------
 void app_loop(void) {
   uint32_t now = HAL_GetTick();
+
+  watchdog_refresh();
 
   // --- High priority: USB + audio + flash ---
   tud_task();
@@ -419,7 +496,10 @@ void app_loop(void) {
   }
 
   // --- Debounced settings save ---
-  if (settings_dirty && (now - settings_save_tick >= SETTINGS_SAVE_DELAY_MS)) {
+  // Deferred while an EQ profile flash operation is running: a concurrent
+  // HAL_FLASH_Program would block on the in-progress sector erase
+  if (settings_dirty && (now - settings_save_tick >= SETTINGS_SAVE_DELAY_MS) &&
+      !eq_profile_flash_busy()) {
     app_save_settings();
     settings_dirty = 0;
   }

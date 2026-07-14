@@ -124,9 +124,10 @@ static const uint8_t font5x7[][5] = {
     {0x08,0x08,0x2A,0x1C,0x08}, //126 '~'
 };
 
-static void sh1106_cmd(uint8_t cmd) {
+static bool sh1106_cmd(uint8_t cmd) {
+    if (sh1106_i2c == NULL) return false;
     uint8_t buf[2] = {0x00, cmd}; // Co=0, D/C#=0 (command)
-    HAL_I2C_Master_Transmit(sh1106_i2c, SH1106_I2C_ADDR, buf, 2, 100);
+    return HAL_I2C_Master_Transmit(sh1106_i2c, SH1106_I2C_ADDR, buf, 2, 100) == HAL_OK;
 }
 
 static void sh1106_send_page(uint8_t page) {
@@ -230,7 +231,8 @@ static uint8_t next_dirty_page(uint8_t from) {
 }
 
 void sh1106_update(void) {
-    if (sh1106_dma_busy) return;
+    if (sh1106_i2c == NULL) return; // not initialized yet
+    if (sh1106_dma_busy) return;   // in-flight chain will pick up dirty pages
     if (dirty_pages == 0) return;  // nothing changed
 
     sh1106_dma_busy = 1;
@@ -242,9 +244,12 @@ uint8_t sh1106_is_busy(void) {
     return sh1106_dma_busy;
 }
 
-void sh1106_set_brightness(uint8_t val) {
-    sh1106_cmd(0x81);  // Set contrast command
-    sh1106_cmd(val);   // 0x00 = dimmest, 0xFF = brightest
+// Returns false (and writes nothing) if the bus is busy with a page DMA
+// transfer or the write fails — caller should retry later.
+bool sh1106_set_brightness(uint8_t val) {
+    if (sh1106_dma_busy) return false;
+    if (!sh1106_cmd(0x81)) return false; // Set contrast command
+    return sh1106_cmd(val);              // 0x00 = dimmest, 0xFF = brightest
 }
 
 void sh1106_invert_region(uint8_t x, uint8_t y, uint8_t w, uint8_t h) {
@@ -397,7 +402,9 @@ void sh1106_write_string_centered(const char *str, uint8_t y) {
 void HAL_I2C_MasterTxCpltCallback(I2C_HandleTypeDef *hi2c) {
     if (hi2c == sh1106_i2c) {
         dirty_pages &= ~(1 << current_page);  // mark sent page clean
-        uint8_t next = next_dirty_page(current_page + 1);
+        // Rescan from page 0, not from current_page+1: pages dirtied behind
+        // the cursor while this transfer was in flight must not be stranded
+        uint8_t next = next_dirty_page(0);
         if (next < 8) {
             current_page = next;
             sh1106_send_page(current_page);

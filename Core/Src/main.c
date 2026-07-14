@@ -22,6 +22,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "app.h"
+#include "fault.h"
 #include "SEGGER_RTT.h"
 /* USER CODE END Includes */
 
@@ -593,6 +594,8 @@ void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
+  app_fault_safe_state(); /* mute DAC + amp off; IWDG resets us if running */
+  fault_capture(FAULT_ERROR_HANDLER);
   __disable_irq();
   while (1)
   {
