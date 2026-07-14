@@ -39,7 +39,11 @@ ENTRY(Reset_Handler)
 /* Memories definition */
 MEMORY
 {
-  RAM      (xrw)  : ORIGIN = 0x20000000,   LENGTH = 32K
+  /* Top 16 bytes of RAM (0x20007FF0-0x20007FFF) are reserved for the DFU
+     bootloader magic word: they must never be part of the stack, or the
+     Reset_Handler/SystemInit prologue could clobber the magic before it
+     is checked. See app_reboot_to_dfu() and SystemInit(). */
+  RAM      (xrw)  : ORIGIN = 0x20000000,   LENGTH = 32K - 16
   FLASH    (rx)   : ORIGIN = 0x08000000,   LENGTH = 128K - 16K
   PROFILES (r)    : ORIGIN = 0x0801C000,   LENGTH = 8K
   SETTINGS (r)    : ORIGIN = 0x0801E000,   LENGTH = 8K
@@ -210,6 +214,15 @@ SECTIONS
       PROVIDE( __bss_end = .);
   } >RAM
   PROVIDE( __non_tls_bss_start = ADDR(.bss) );
+
+  /* Not loaded, not zeroed at startup: survives every reset except power
+     loss. Used for fault records (see App/Src/fault.c). */
+  .noinit (NOLOAD) : ALIGN(4)
+  {
+    *(.noinit)
+    *(.noinit*)
+    . = ALIGN(4);
+  } >RAM
 
   PROVIDE( __bss_start = __tbss_start );
   PROVIDE( __bss_size = __bss_end - __bss_start );

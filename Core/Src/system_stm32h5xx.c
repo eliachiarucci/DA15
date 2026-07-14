@@ -199,7 +199,9 @@
 void SystemInit(void)
 {
   /* Check for DFU bootloader magic value (must run before .bss is cleared) */
-  #define DFU_MAGIC_ADDR  ((volatile uint32_t *)0x20007FF0)  /* end of 32KB RAM */
+  /* 0x20007FF0 lies in the 16-byte region above the linker's RAM end (RAM is
+     declared 32K-16), so no stack push can clobber it before this check */
+  #define DFU_MAGIC_ADDR  ((volatile uint32_t *)0x20007FF0)
   #define DFU_MAGIC_VALUE 0xDEADBEEFUL
   #define SYSTEM_MEMORY   0x0BF87000UL  /* H503 system bootloader — verify from AN2606! */
 
