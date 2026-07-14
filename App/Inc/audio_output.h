@@ -27,10 +27,6 @@ void audio_output_task(void);
 // Set USB mute state (called from USB volume control)
 void audio_output_set_mute(uint8_t mute);
 
-// USB bus suspend/resume: amplifier power-down and pop-free restore
-void audio_output_bus_suspend(void);
-void audio_output_bus_resume(void);
-
 // Local pre-attenuation (encoder-controlled, independent of USB volume)
 // Volume 0-100: 100 = unity gain, 0 = silence
 void audio_output_set_local_volume(uint8_t vol);

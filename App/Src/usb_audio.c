@@ -286,12 +286,9 @@ void tud_suspend_cb(bool remote_wakeup_en) {
     (void) remote_wakeup_en;
     audio_streaming = false;
     audio_output_stop_streaming();
-    audio_output_bus_suspend(); // amp off + DAC muted while suspended
 }
 
 // Invoked when usb bus is resumed
 void tud_resume_cb(void) {
-    // Streaming resumes when the host sets the interface again;
-    // restore the analog path now (pop-free: I2S kept running).
-    audio_output_bus_resume();
+    // Resume handled by host sending new set interface
 }

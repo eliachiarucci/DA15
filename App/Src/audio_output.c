@@ -558,25 +558,6 @@ void audio_output_set_mute(uint8_t mute) {
   usb_muted = mute;
 }
 
-// USB bus suspend: disable the amplifier (bulk of the power draw) and
-// hard-mute the DAC until the bus resumes.
-void audio_output_bus_suspend(void) {
-  if (!dma_running)
-    return;
-  disable_amplifier();
-  mute_dac();
-}
-
-// USB bus resume: restore the mute state, then re-enable the amplifier.
-// I2S kept outputting DC-offset silence throughout suspend, so the DAC
-// output is settled and the PCM5102A XSMT soft-unmute ramp is pop-free.
-void audio_output_bus_resume(void) {
-  if (!dma_running)
-    return;
-  update_mute_state();
-  enable_amplifier();
-}
-
 void audio_output_set_local_volume(uint8_t vol) {
   if (vol > 100)
     vol = 100;
