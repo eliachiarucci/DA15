@@ -65,7 +65,8 @@ typedef struct {
 // ---------------------------------------------------------------------------
 typedef enum {
     EQ_FLASH_IDLE,
-    EQ_FLASH_BUSY,
+    EQ_FLASH_ERASING,   // sector erase in progress (polled, non-blocking)
+    EQ_FLASH_BUSY,      // incremental quad-word writes in progress
     EQ_FLASH_DONE_OK,
     EQ_FLASH_DONE_ERR,
 } eq_flash_status_t;
@@ -94,14 +95,18 @@ uint8_t eq_profile_count(void);
 // ---------------------------------------------------------------------------
 
 // Start async flash save. Returns false if already busy.
-// Erases sector (blocking ~1-2ms), then writes in chunks via flash_task.
+// Starts a non-blocking sector erase; erase completion and the subsequent
+// chunked writes are driven by eq_profile_flash_task().
 bool eq_profile_start_flash_save(void);
 
-// Process flash write state machine. Call from main loop.
+// Process flash erase/write state machine. Call from main loop.
 void eq_profile_flash_task(void);
 
 // Get flash operation status. DONE states reset to IDLE after reading.
 eq_flash_status_t eq_profile_flash_status(void);
+
+// True while an erase or write is in progress (non-consuming check).
+bool eq_profile_flash_busy(void);
 
 // ---------------------------------------------------------------------------
 // Active profile

@@ -74,7 +74,13 @@ static bool audio10_set_req_ep(tusb_control_request_t const* p_request, uint8_t*
                 // Request uses 3 bytes
                 TU_VERIFY(p_request->wLength == 3);
 
-                current_sample_rate = tu_unaligned_read32(pBuff) & 0x00FFFFFF;
+                // Only 48kHz is advertised in the descriptor. Reject anything
+                // else (STALL) so a nonconforming host can never configure the
+                // feedback loop for a rate the fixed I2S clock cannot produce.
+                uint32_t freq = tu_unaligned_read32(pBuff) & 0x00FFFFFF;
+                TU_VERIFY(freq == 48000);
+
+                current_sample_rate = freq;
                 return true;
             }
             break;

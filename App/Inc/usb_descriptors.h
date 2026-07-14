@@ -15,6 +15,9 @@
 //--------------------------------------------------------------------+
 #define USB_STRING_MAX_LEN  32
 
+// Fill the serial-number string from the device UID (call before tusb_init)
+void usb_desc_init_serial(void);
+
 const char *usb_desc_get_manufacturer(void);
 const char *usb_desc_get_product(void);
 const char *usb_desc_get_audio_itf(void);
@@ -103,6 +106,7 @@ enum {
   /* Class-Specific AS Isochronous Audio Data Endpoint Descriptor(4.6.1.2) */\
   TUD_AUDIO10_DESC_CS_AS_ISO_EP(/*_attr*/ AUDIO10_CS_AS_ISO_DATA_EP_ATT_SAMPLING_FRQ, /*_lockdelayunits*/ AUDIO10_CS_AS_ISO_DATA_EP_LOCK_DELAY_UNIT_UNDEFINED, /*_lockdelay*/ 0x0000),\
   /* Standard AS Isochronous Synch Endpoint Descriptor (4.6.2.1) */\
-  TUD_AUDIO10_DESC_STD_AS_ISO_SYNC_EP(/*_ep*/ _epfb, /*_bRefresh*/ 0)
+  /* bRefresh: feedback refresh period = 2^n frames; spec range is 1-9 */\
+  TUD_AUDIO10_DESC_STD_AS_ISO_SYNC_EP(/*_ep*/ _epfb, /*_bRefresh*/ 1)
 
 #endif /* USB_DESCRIPTORS_H_ */

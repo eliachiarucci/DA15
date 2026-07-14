@@ -5,6 +5,7 @@
 #define SH1106_H
 
 #include "stm32h5xx_hal.h"
+#include <stdbool.h>
 #include <stdint.h>
 
 // Display dimensions (128x64)
@@ -24,7 +25,7 @@ void sh1106_write_char(char c);
 void sh1106_write_string(const char *str);
 void sh1106_write_string_centered(const char *str, uint8_t y);
 uint8_t sh1106_is_busy(void);
-void sh1106_set_brightness(uint8_t val);
+bool sh1106_set_brightness(uint8_t val); // false = busy/failed, retry later
 void sh1106_invert_region(uint8_t x, uint8_t y, uint8_t w, uint8_t h);
 void sh1106_display_off(void);
 void sh1106_display_on(void);

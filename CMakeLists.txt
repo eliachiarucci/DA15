@@ -48,13 +48,14 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined library search paths
 )
 
-# Add sources to executable
-target_sources(${CMAKE_PROJECT_NAME} PRIVATE
-    # Application sources
+# Application sources (held in a variable so stricter warnings can be
+# applied to our code without triggering noise in vendor libraries)
+set(APP_SOURCES
     "App/Src/app.c"
     "App/Src/display.c"
     "App/Src/audio_output.c"
     "App/Src/audio_eq.c"
+    "App/Src/fault.c"
     "App/Src/usb_descriptors.c"
     "App/Src/usb_audio.c"
     "App/Src/sh1106.c"
@@ -62,6 +63,17 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     "App/Src/settings.c"
     "App/Src/eq_profile.c"
     "App/Src/usb_comm.c"
+)
+
+# Stricter diagnostics for application code only
+set_source_files_properties(${APP_SOURCES} PROPERTIES
+    COMPILE_OPTIONS "-Wextra"
+)
+
+# Add sources to executable
+target_sources(${CMAKE_PROJECT_NAME} PRIVATE
+    # Application sources
+    ${APP_SOURCES}
 
     # SEGGER RTT
     "Lib/RTT/SEGGER_RTT.c"
@@ -127,4 +139,13 @@ add_custom_command(TARGET ${CMAKE_PROJECT_NAME} POST_BUILD
     COMMAND ${CMAKE_OBJCOPY} -O binary $<TARGET_FILE:${CMAKE_PROJECT_NAME}>
             ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_PROJECT_NAME}.bin
     COMMENT "Generating ${CMAKE_PROJECT_NAME}.bin"
+)
+
+# Guard: fail the build if a CubeMX regeneration clobbered the linker
+# script's DFU-magic RAM reservation (see cmake/check_memory_layout.cmake)
+add_custom_command(TARGET ${CMAKE_PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND}
+            -DELF=$<TARGET_FILE:${CMAKE_PROJECT_NAME}> -DNM=${CMAKE_NM}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/check_memory_layout.cmake
+    COMMENT "Checking RAM layout (_estack / DFU-magic reservation)"
 )

@@ -73,6 +73,10 @@ static int8_t cursor_to_visible_row(void) {
 static const uint8_t brightness_hw[] = {10, 80, 200};
 static const char *brightness_names[] = {"LOW", "MID", "HIGH"};
 static uint8_t brightness_level = 1;
+// Contrast value actually written to the panel; sh1106_set_brightness can
+// fail while a page DMA transfer is in flight, so mismatches are retried
+// from display_draw()
+static uint8_t applied_brightness_hw = 0xFF;
 
 // ---------------------------------------------------------------------------
 // Display timeout
@@ -234,15 +238,26 @@ void display_init(uint8_t brightness, uint8_t timeout) {
     brightness_level = brightness;
   if (timeout <= 3)
     timeout_level = timeout;
-  sh1106_set_brightness(brightness_hw[brightness_level]);
+  if (sh1106_set_brightness(brightness_hw[brightness_level]))
+    applied_brightness_hw = brightness_hw[brightness_level];
   last_activity_tick = HAL_GetTick();
   display_dirty = 1;
 }
 
 void display_draw(uint32_t now) {
+  // Retry a brightness write that was skipped while I2C DMA was busy
+  if (applied_brightness_hw != brightness_hw[brightness_level] &&
+      sh1106_set_brightness(brightness_hw[brightness_level])) {
+    applied_brightness_hw = brightness_hw[brightness_level];
+  }
+
   if (!display_dirty || display_is_off)
     return;
   if (now - display_last_tick < DISPLAY_MIN_INTERVAL_MS)
+    return;
+  // Previous frame still going out over I2C DMA: retry next loop iteration
+  // and keep display_dirty set so the latest state is never dropped
+  if (sh1106_is_busy())
     return;
 
   switch (screen_state) {
@@ -388,7 +403,9 @@ void display_set_brightness(uint8_t level) {
   if (level > 2)
     level = 2;
   brightness_level = level;
-  sh1106_set_brightness(brightness_hw[brightness_level]);
+  // May fail while a DMA transfer is in flight; display_draw retries
+  if (sh1106_set_brightness(brightness_hw[brightness_level]))
+    applied_brightness_hw = brightness_hw[brightness_level];
 }
 
 uint8_t display_get_timeout_level(void) { return timeout_level; }

@@ -12,6 +12,7 @@
 #ifndef USB_COMM_H
 #define USB_COMM_H
 
+#include "version.h"
 #include <stdint.h>
 
 // Protocol commands
@@ -36,6 +37,8 @@
 #define CMD_GET_AMP           0x94
 #define CMD_SET_DAC           0x95
 #define CMD_SET_AMP           0x96
+#define CMD_GET_FAULT_INFO    0x97
+#define CMD_CLEAR_FAULT       0x98
 
 // Response status codes
 #define STATUS_OK             0x00
@@ -48,10 +51,7 @@
 #define HW_VERSION_MAJOR  1
 #define HW_VERSION_MINOR  0
 
-// Firmware version
-#define FW_VERSION_MAJOR  1
-#define FW_VERSION_MINOR  0
-#define FW_VERSION_PATCH  0
+// Firmware version comes from version.h (single source of truth)
 
 // Initialize CDC communication (call after tusb_init)
 void usb_comm_init(void);

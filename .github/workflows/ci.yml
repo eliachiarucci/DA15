@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  firmware:
+    name: Firmware build (ARM)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc-arm-none-eabi libnewlib-arm-none-eabi ninja-build
+
+      - name: Configure (Release preset)
+        run: cmake --preset Release
+
+      - name: Build
+        run: cmake --build build/Release
+
+      - name: Report memory usage
+        run: arm-none-eabi-size build/Release/DA15.elf
+
+      - name: Upload firmware artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: DA15-firmware
+          path: |
+            build/Release/DA15.elf
+            build/Release/DA15.bin
+
+  host-tests:
+    name: Host unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S tests -B build/host-tests
+
+      - name: Build
+        run: cmake --build build/host-tests
+
+      - name: Run
+        run: ctest --test-dir build/host-tests --output-on-failure
+
+  static-analysis:
+    name: Static analysis (cppcheck)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cppcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cppcheck
+
+      - name: Run cppcheck on App sources
+        run: ./scripts/static-analysis.sh

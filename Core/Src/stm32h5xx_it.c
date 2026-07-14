@@ -24,6 +24,7 @@
 /* USER CODE BEGIN Includes */
 #include "app.h"
 #include "encoder.h"
+#include "fault.h"
 #include "SEGGER_RTT.h"
 /* USER CODE END Includes */
 
@@ -86,11 +87,14 @@ void NMI_Handler(void)
     SEGGER_RTT_printf(0, "[NMI] flash ECC error, will erase settings\n");
     return;
   }
+  app_fault_safe_state(); // mute DAC + amp off before hanging
+  fault_capture(FAULT_NMI);
   SEGGER_RTT_printf(0, "!!! NMI (unknown source) !!!\n");
   /* USER CODE END NonMaskableInt_IRQn 0 */
   /* USER CODE BEGIN NonMaskableInt_IRQn 1 */
    while (1)
   {
+    // IWDG resets the device (~1s); analog path is already safe
   }
   /* USER CODE END NonMaskableInt_IRQn 1 */
 }
@@ -101,6 +105,8 @@ void NMI_Handler(void)
 void HardFault_Handler(void)
 {
   /* USER CODE BEGIN HardFault_IRQn 0 */
+  app_fault_safe_state(); // mute DAC + amp off; IWDG will reset (~1s)
+  fault_capture(FAULT_HARD);
   SEGGER_RTT_printf(0, "!!! HARD FAULT !!!\n");
   /* USER CODE END HardFault_IRQn 0 */
   while (1)
@@ -116,6 +122,8 @@ void HardFault_Handler(void)
 void MemManage_Handler(void)
 {
   /* USER CODE BEGIN MemoryManagement_IRQn 0 */
+  app_fault_safe_state(); // mute DAC + amp off; IWDG will reset (~1s)
+  fault_capture(FAULT_MEM);
   SEGGER_RTT_printf(0, "!!! MEM MANAGE FAULT !!!\n");
   /* USER CODE END MemoryManagement_IRQn 0 */
   while (1)
@@ -131,6 +139,8 @@ void MemManage_Handler(void)
 void BusFault_Handler(void)
 {
   /* USER CODE BEGIN BusFault_IRQn 0 */
+  app_fault_safe_state(); // mute DAC + amp off; IWDG will reset (~1s)
+  fault_capture(FAULT_BUS);
   SEGGER_RTT_printf(0, "!!! BUS FAULT !!!\n");
   /* USER CODE END BusFault_IRQn 0 */
   while (1)
@@ -146,6 +156,8 @@ void BusFault_Handler(void)
 void UsageFault_Handler(void)
 {
   /* USER CODE BEGIN UsageFault_IRQn 0 */
+  app_fault_safe_state(); // mute DAC + amp off; IWDG will reset (~1s)
+  fault_capture(FAULT_USAGE);
   SEGGER_RTT_printf(0, "!!! USAGE FAULT !!!\n");
   /* USER CODE END UsageFault_IRQn 0 */
   while (1)

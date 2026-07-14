@@ -6,23 +6,18 @@
  * Bass: Bandpass-style boost (~50-180Hz) for punch/thump
  *       Highpass at ~50Hz + two-stage lowpass at ~180Hz
  * Treble: First-order highpass + boost (~1700Hz)
- * Full 24-bit precision using split-multiply to avoid int32_t overflow on Cortex-M0
+ * Full 24-bit precision, Q12 fixed-point
  */
 
 #include "audio_eq.h"
 #include <string.h>
 
 //--------------------------------------------------------------------+
-// Split-multiply for 24-bit x Q12 without overflow
-// Decomposes: (a * b) >> 12 = (a_hi * b) >> 4 + (a_lo * b) >> 12
-// where a_hi = a >> 8 (signed 16-bit), a_lo = a & 0xFF (unsigned 8-bit)
-// Max error: ±1 LSB per operation (rounding)
-// Cost: 2 MUL + 2 shift + 1 AND + 1 ADD = ~7 cycles on M0
+// 24-bit x Q12 multiply: (a * b) >> 12 through a 64-bit intermediate.
+// Compiles to a single SMULL + shift on Cortex-M33 — exact, no overflow.
 //--------------------------------------------------------------------+
 static inline int32_t mul_q12(int32_t a, int32_t b) {
-    int32_t hi = a >> 8;
-    int32_t lo = a & 0xFF;
-    return (hi * b >> 4) + (lo * b >> 12);
+    return (int32_t)(((int64_t)a * b) >> 12);
 }
 
 //--------------------------------------------------------------------+
@@ -165,6 +160,8 @@ bool audio_eq_is_enabled(void) {
 void audio_eq_process(int32_t *buffer, uint16_t sample_count, uint32_t volume_scale) {
     // If EQ disabled or all bands at 0, apply volume only (no pre-attenuation)
     if (!eq_enabled || (bass_level == 0 && treble_level == 0)) {
+        if (volume_scale >= 65536)
+            return; // unity gain: nothing to do
         for (uint16_t i = 0; i < sample_count; i++) {
             buffer[i] = (int32_t)(((int64_t)buffer[i] * volume_scale) >> 16);
         }

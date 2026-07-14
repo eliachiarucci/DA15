@@ -7,6 +7,9 @@
 
 #include "tusb.h"
 #include "usb_descriptors.h"
+#include "version.h"
+#include "stm32h5xx_hal.h"
+#include <stdio.h>
 #include <string.h>
 
 //--------------------------------------------------------------------+
@@ -25,7 +28,7 @@ static tusb_desc_device_t const desc_device = {
 
     .idVendor           = 0x1209,  // pid.codes VID
     .idProduct          = 0xDA15,  // pid.codes PID
-    .bcdDevice          = 0x0100,
+    .bcdDevice          = FW_VERSION_BCD, // from version.h
 
     .iManufacturer      = 0x01,
     .iProduct           = 0x02,
@@ -167,12 +170,25 @@ static char usb_manufacturer_str[USB_STRING_MAX_LEN + 1] = "Elia Chiarucci";
 static char usb_product_str[USB_STRING_MAX_LEN + 1]      = "DA15";
 static char usb_audio_itf_str[USB_STRING_MAX_LEN + 1]    = "DA15";
 
+// Per-unit serial number, derived from the device UID at init
+// (fallback string is only seen if usb_desc_init_serial() was never called)
+static char usb_serial_str[13] = "000000000001";
+
+// Derive the USB serial from the 96-bit device UID using the same algorithm
+// as the STM32 ROM DFU bootloader, so the device keeps a single identity in
+// both runtime and DFU mode. Call before tusb_init().
+void usb_desc_init_serial(void) {
+    snprintf(usb_serial_str, sizeof(usb_serial_str), "%08lX%04lX",
+             (unsigned long)(HAL_GetUIDw0() + HAL_GetUIDw2()),
+             (unsigned long)((HAL_GetUIDw1() >> 16) & 0xFFFFU));
+}
+
 // Array of pointer to string descriptors
 static char const* string_desc_arr[] = {
     (const char[]) { 0x09, 0x04 },  // 0: Supported language is English (0x0409)
     usb_manufacturer_str,            // 1: Manufacturer
     usb_product_str,                 // 2: Product
-    "000000000001",                 // 3: Serial number
+    usb_serial_str,                  // 3: Serial number (from device UID)
     usb_audio_itf_str,               // 4: Audio Interface
     "DFU Runtime",                  // 5: DFU Runtime Interface
     "DA15 Config",               // 6: CDC Interface
